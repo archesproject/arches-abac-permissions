@@ -12,18 +12,18 @@ classifiers = [
     "Programming Language :: Python",
     "Programming Language :: Python :: 3",
     "Programming Language :: Python :: 3 :: Only",
-    "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Programming Language :: Python :: 3.13",
+    "Programming Language :: Python :: 3.14",
     "Framework :: Django",
-    "Framework :: Django :: 5.2",
+    "Framework :: Django :: 6.1",
     "Intended Audience :: Developers",
     "Intended Audience :: Science/Research",
     "Intended Audience :: Information Technology",
 ]
-requires-python = ">=3.11"
+requires-python = ">=3.12"
 dependencies = [
-    "arches>=8.1.4,<8.2.0",
+    "arches>=8.2.0,<8.3.0",
 ]
 version = "0.0.1"
 
@@ -31,9 +31,9 @@ version = "0.0.1"
 dev = [
     "black==26.3.1",
     "coverage",
-    "django-silk==5.1.0",
+    "django-silk==5.5.0",
     "livereload",
-    "pre-commit==3.8.0",
+    "pre-commit==4.6.1",
     "sst",
 ]
 
