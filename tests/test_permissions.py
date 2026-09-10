@@ -37,7 +37,9 @@ class AbacPermissionFrameworkTests(SimpleTestCase):
         self.assertTrue(ArchesAbacPermissionFramework.is_exclusive)
 
     def test_settings_resolve_to_abac_framework(self):
-        self.assertIsInstance(_get_permission_framework(), ArchesAbacPermissionFramework)
+        self.assertIsInstance(
+            _get_permission_framework(), ArchesAbacPermissionFramework
+        )
 
     def test_abac_rule_hooks_default_deny(self):
         framework = ArchesAbacPermissionFramework()
