@@ -298,7 +298,7 @@ EXPORT_DATA_FIELDS_IN_CARD_ORDER = False
 CACHE_BY_USER = {"default": 3600 * 24, "anonymous": 3600 * 24}  # 24hrs  # 24hrs
 
 # Changing PERMISSION_FRAMEWORK requires reindexing.
-PERMISSION_FRAMEWORK = "arches_default_deny.ArchesDefaultDenyPermissionFramework"
+PERMISSION_FRAMEWORK = "arches_abac_permission_framework.ArchesAbacPermissionFramework"
 
 # Changing PERMISSION_DEFAULTS requires reindexing.
 PERMISSION_DEFAULTS = {}
