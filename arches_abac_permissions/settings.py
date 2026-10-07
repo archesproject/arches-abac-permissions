@@ -83,12 +83,27 @@ ELASTICSEARCH_CONNECTION_OPTIONS = {
 # a prefix to append to all elasticsearch indexes, note: must be lower case
 ELASTICSEARCH_PREFIX = "arches_abac_permissions"
 
-ELASTICSEARCH_CUSTOM_INDEXES = []
-# [{
+ELASTICSEARCH_CUSTOM_INDEXES = [
+    {
+        "module": "arches.extensions.controlled_lists.search_indexes.reference_index.ReferenceIndex",
+        "name": REFERENCES_INDEX_NAME,
+        "should_update_asynchronously": True,
+    },
+]
+# ELASTICSEARCH_CUSTOM_INDEXES.append({
 #     'module': 'arches_abac_permissions.search_indexes.sample_index.SampleIndex',
 #     'name': 'my_new_custom_index', <-- follow ES index naming rules
 #     'should_update_asynchronously': False  <-- denotes if asynchronously updating the index would affect custom functionality within the project.
-# }]
+# })
+
+TERM_SEARCH_TYPES = list(TERM_SEARCH_TYPES) + [
+    {
+        "type": "reference",
+        "label": _("References"),
+        "key": REFERENCES_INDEX_NAME,
+        "module": "arches.extensions.controlled_lists.search_indexes.reference_index.ReferenceIndex",
+    },
+]
 
 KIBANA_URL = "http://localhost:5601/"
 KIBANA_CONFIG_BASEPATH = "kibana"  # must match Kibana config.yml setting (server.basePath) but without the leading slash,
@@ -128,6 +143,7 @@ INSTALLED_APPS = (
     "webpack_loader",
     "django.contrib.auth",
     "django.contrib.contenttypes",
+    "django.contrib.postgres",
     "django.contrib.sessions",
     "django.contrib.messages",
     "django.contrib.staticfiles",
@@ -143,8 +159,12 @@ INSTALLED_APPS = (
     "django_celery_results",
     "django_migrate_sql",
     "pgtrigger",
+    "rest_framework",
     # "silk",
     "arches_abac_permissions",  # Ensure the project is listed before any other arches applications
+    "arches.extensions.querysets",
+    "arches.extensions.vue_components",
+    "arches.extensions.controlled_lists",
 )
 
 # Placing this last ensures any templates and modules provided by
@@ -277,6 +297,18 @@ CACHES = {
     "user_permission": {
         "BACKEND": "django.core.cache.backends.db.DatabaseCache",
         "LOCATION": "user_permission_cache",
+    },
+    "querysets_concepts": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_concepts_cache",
+        "TIMEOUT": 86400,
+        "OPTIONS": {"MAX_ENTRIES": 1000},
+    },
+    "querysets_resource_instances": {
+        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        "LOCATION": "querysets_resource_instances_cache",
+        "TIMEOUT": 86400,
+        "OPTIONS": {"MAX_ENTRIES": 1000},
     },
 }
 
@@ -448,9 +480,15 @@ LANGUAGES = [
 # override this to permenantly display/hide the language switcher
 SHOW_LANGUAGE_SWITCH = len(LANGUAGES) > 1
 
+# Contributed by arches.extensions.controlled_lists so reference values are
+# indexed alongside the resources that use them.
+ES_MAPPING_MODIFIER_CLASSES = [
+    "arches.extensions.controlled_lists.search.references_es_mapping_modifier.ReferencesEsMappingModifier",
+]
+
 # Implement this class to associate custom documents to the ES resource index
 # See tests.views.search_tests.TestEsMappingModifier class for example
-# ES_MAPPING_MODIFIER_CLASSES = ["arches_abac_permissions.search.es_mapping_modifier.EsMappingModifier"]
+# ES_MAPPING_MODIFIER_CLASSES.append("arches_abac_permissions.search.es_mapping_modifier.EsMappingModifier")
 
 try:
     from .package_settings import *
