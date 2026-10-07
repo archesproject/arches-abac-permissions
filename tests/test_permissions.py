@@ -43,7 +43,7 @@ class AbacPermissionFrameworkTests(SimpleTestCase):
 
     def test_abac_rule_hooks_default_deny(self):
         framework = ArchesAbacPermissionFramework()
-        self.assertEqual(framework.get_abac_rules(None), [])
+        self.assertEqual(list(framework.get_abac_rules(None)), [])
         self.assertFalse(
             framework.evaluate_abac_rules(None, None, "view_resourceinstance")
         )

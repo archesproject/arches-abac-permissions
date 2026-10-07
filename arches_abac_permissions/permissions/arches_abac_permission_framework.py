@@ -43,15 +43,22 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
     extend.
     """
 
-    def get_abac_rules(self, user_or_group: User | Group) -> list:
+    def get_abac_rules(self, user_or_group: User | Group | None):
         """
-        Return the ABAC rules/policies that apply to the given user or
-        group.
+        Return the InclusionRules assigned (via InclusionRuleGroupPermission)
+        to the group, or to any of the user's groups.
+        """
+        from arches_abac_permissions.models import InclusionRule
 
-        TODO: implement rule retrieval (e.g. from a rule configuration
-        model) once the ABAC rule schema is defined.
-        """
-        return []
+        if isinstance(user_or_group, Group):
+            groups = [user_or_group]
+        elif isinstance(user_or_group, User):
+            groups = user_or_group.groups.all()
+        else:
+            return InclusionRule.objects.none()
+        return InclusionRule.objects.filter(
+            group_permissions__group__in=groups
+        ).distinct()
 
     def evaluate_abac_rules(
         self, user_or_group: User | Group, obj: ResourceInstance, action: str
