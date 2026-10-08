@@ -8,7 +8,7 @@ class ArchesAbacPermissionsConfig(AppConfig):
     def ready(self):
         # Register proxy rule models so they are known to the app registry.
         from arches_abac_permissions.rules import (  # noqa
+            lifecycle_state_rule,
             queryset_rule,
             search_rule,
-            string_substring_rule,
         )

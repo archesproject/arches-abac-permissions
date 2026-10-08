@@ -113,28 +113,34 @@ Things to be aware of:
 
 | `modulename` | `classname` | Matches |
 |---|---|---|
-| `string_substring_rule.py` | `StringSubstringRule` | Resources where a string node's value contains a substring |
+| `lifecycle_state_rule.py` | `LifecycleStateRule` | Resources of a graph that are in a given lifecycle state |
 | `search_rule.py` | `SearchRule` | Not yet evaluated; stores a saved search query |
 | `queryset_rule.py` | `QuerySetRule` | Not yet evaluated |
 
-## Creating a string substring rule
+## Creating a lifecycle state rule
 
-A string substring rule grants permissions on every resource that has a tile whose value for a given string node contains a given piece of text. Matching:
+A lifecycle state rule grants permissions on every resource of a given resource model (graph) that is in a given lifecycle state, for example every **Active** resource of the **Person** model. When a resource moves to another lifecycle state, it stops matching the rule.
 
-- ignores case (`getty` matches "Getty" and "GETTY");
-- checks the value in every language;
-- matches anywhere in the value (`villa` matches "The Getty Villa");
-- treats `%` and `_` as literal characters, not wildcards.
+### 1. Find the graph and lifecycle state ids
 
-### 1. Find the node id
-
-The rule needs the id of a node whose datatype is **string**. You can find it in the Graph Designer, or from the Django shell:
+The rule needs the id of a resource model and the id of one of the states in that model's resource instance lifecycle. You can list them from the Django shell:
 
 ```bash
 python manage.py shell
->>> from arches.app.models.models import Node
->>> Node.objects.filter(datatype="string").values_list("nodeid", "name", "graph__name")
+>>> from arches.app.models.models import GraphModel
+>>> for graph in GraphModel.objects.filter(isresource=True, source_identifier=None):
+...     print(graph.graphid, graph.name)
+...     for state in graph.resource_instance_lifecycle.resource_instance_lifecycle_states.all():
+...         print("   ", state.id, state.name)
 ```
+
+Graphs that use Arches' default **Standard** lifecycle share these states:
+
+| State | Id |
+|---|---|
+| Draft | `9375c9a7-dad2-4f14-a5c1-d7e329fdde4f` |
+| Active | `f75bb034-36e3-4ab4-8167-f520cf0b4c58` |
+| Retired | `d95d9c0e-0e2c-4450-93a3-d788b91abcc8` |
 
 ### 2. Add the rule in the admin
 
@@ -143,22 +149,22 @@ Sign in as a superuser, go to `/admin/`, and under **Arches_Abac_Permissions** c
 | Field | Example value | Notes |
 |---|---|---|
 | Owner | *(leave blank)* | Optional. The user responsible for the rule. |
-| Name | `Resources named like "Getty"` | Any descriptive name. |
-| Modulename | `string_substring_rule.py` | Must be exactly this value. |
-| Classname | `StringSubstringRule` | Must be exactly this value. |
+| Name | `Active Person resources` | Any descriptive name. |
+| Modulename | `lifecycle_state_rule.py` | Must be exactly this value. |
+| Classname | `LifecycleStateRule` | Must be exactly this value. |
 | Definition | see below | JSON. |
 
 Definition:
 
 ```json
 {
-    "nodeid": "c2cb257f-e6a2-4148-90d5-d10c7fa1a573",
-    "substring": "getty"
+    "graphid": "22477f01-1a44-11e9-b0a9-000d3ab1e588",
+    "lifecycle_state_id": "f75bb034-36e3-4ab4-8167-f520cf0b4c58"
 }
 ```
 
-- `nodeid`: the id of the string node from step 1. Replace the example value with a node id from your own graph.
-- `substring`: the text to look for. It must not be empty.
+- `graphid`: the id of the resource model from step 1. Replace the example value with a graph id from your own project.
+- `lifecycle_state_id`: the id of the lifecycle state from step 1. It must be a state of the graph's lifecycle.
 
 ### 3. Grant permissions to a group
 
@@ -181,13 +187,14 @@ Click **Save**. To grant the same rule to several groups, add one group permissi
 
 ### 4. Check the rule
 
-Sign in as a non-superuser member of the group and open a resource whose node value contains the substring. You can also check from the Django shell which resources the rule matches:
+Sign in as a non-superuser member of the group and open a resource of the graph that is in the lifecycle state. You can also check from the Django shell which resources the rule matches:
 
 ```bash
 python manage.py shell
 >>> from arches_abac_permissions.models import InclusionRule
->>> rule = InclusionRule.objects.get(name='Resources named like "Getty"')
+>>> rule = InclusionRule.objects.get(name="Active Person resources")
 >>> rule.get_matching_resources()
+>>> rule.get_search_rule_url()  # an equivalent Arches search, to view the matches
 ```
 
 If the rule has no effect, check that:
@@ -247,9 +254,9 @@ class MyRule(InclusionRule):
 
 - Rule classes are **proxy models** of `InclusionRule`, so they share its table and add no columns.
 - Set `app_label` to your project's app label, or leave it out. **Don't copy `app_label = "arches_abac_permissions"`** from the built-in rules: if you do, `makemigrations` will try to write your rule's migration into this package.
-- **Give the module a name the built-in rules don't use** (not `string_substring_rule`, `search_rule` or `queryset_rule`). Lookup uses the first match in `INSTALLED_APPS` order, so a duplicate name could load the wrong class.
+- **Give the module a name the built-in rules don't use** (not `lifecycle_state_rule`, `search_rule` or `queryset_rule`). Lookup uses the first match in `INSTALLED_APPS` order, so a duplicate name could load the wrong class.
 
-See `arches_abac_permissions/rules/string_substring_rule.py` for a complete example.
+See `arches_abac_permissions/rules/lifecycle_state_rule.py` for a complete example.
 
 ### 2. Register the rule when Django starts
 
@@ -279,7 +286,7 @@ The migration only records the proxy model and creates no table.
 
 ### 4. Use the rule
 
-Create an inclusion rule in the admin as described in [Creating a string substring rule](#creating-a-string-substring-rule), entering your own module and class:
+Create an inclusion rule in the admin as described in [Creating a lifecycle state rule](#creating-a-lifecycle-state-rule), entering your own module and class:
 
 | Field | Value |
 |---|---|
