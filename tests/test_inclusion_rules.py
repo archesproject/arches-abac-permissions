@@ -10,15 +10,17 @@ from arches.app.models.models import (
     Node,
     NodeGroup,
     ResourceInstance,
+    ResourceInstanceLifecycle,
+    ResourceInstanceLifecycleState,
     TileModel,
 )
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.permissions.arches_abac_permission_framework import (
     ArchesAbacPermissionFramework,
 )
+from arches_abac_permissions.rules.lifecycle_state_rule import LifecycleStateRule
 from arches_abac_permissions.rules.queryset_rule import QuerySetRule
 from arches_abac_permissions.rules.search_rule import SearchRule
-from arches_abac_permissions.rules.string_substring_rule import StringSubstringRule
 
 
 def make_rule(name="rule", **kwargs):
@@ -67,114 +69,137 @@ class InclusionRuleTests(TestCase):
         self.assertIs(rule.get_search_rule_url(), False)
 
 
-class StringNodeTestCase(TestCase):
+class LifecycleTestCase(TestCase):
     @classmethod
     def setUpTestData(cls):
-        cls.graph = GraphModel.objects.create(name="Test graph", isresource=True)
+        lifecycle = ResourceInstanceLifecycle.objects.create(name="Test lifecycle")
+        cls.draft_state = cls.make_state(lifecycle, "Draft", is_initial_state=True)
+        cls.active_state = cls.make_state(lifecycle, "Active")
+        other_lifecycle = ResourceInstanceLifecycle.objects.create(name="Other")
+        cls.other_lifecycle_state = cls.make_state(
+            other_lifecycle, "Other initial", is_initial_state=True
+        )
+
+        cls.graph = cls.make_graph("test_graph", lifecycle)
+        cls.other_graph = cls.make_graph("other_graph", lifecycle)
+        cls.branch = GraphModel.objects.create(
+            name="Branch", slug="branch", isresource=False
+        )
         cls.nodegroup = NodeGroup.objects.create()
-        cls.string_node = cls.make_node("Name", "string")
-        cls.number_node = cls.make_node("Count", "number")
-
-        cls.matching = cls.make_resource({"en": "The Getty Villa", "es": "La Villa"})
-        cls.other_language = cls.make_resource({"en": "Museum", "es": "Getty Centro"})
-        cls.non_matching = cls.make_resource({"en": "Something else"})
-        cls.null_value = cls.make_resource(None)
-        cls.wildcards = cls.make_resource({"en": "100%_done"})
-
-    @classmethod
-    def make_node(cls, name, datatype):
-        return Node.objects.create(
-            name=name,
-            datatype=datatype,
+        # Reading a resource requires read_nodegroup on a node of its graph.
+        Node.objects.create(
+            name="Name",
+            datatype="string",
             graph=cls.graph,
             nodegroup=cls.nodegroup,
             istopnode=False,
         )
 
+        cls.matching = cls.make_resource(cls.graph, cls.active_state)
+        cls.also_matching = cls.make_resource(cls.graph, cls.active_state)
+        cls.non_matching = cls.make_resource(cls.graph, cls.draft_state)
+        cls.other_graph_active = cls.make_resource(cls.other_graph, cls.active_state)
+
+    @staticmethod
+    def make_state(lifecycle, name, is_initial_state=False):
+        return ResourceInstanceLifecycleState.objects.create(
+            name=name,
+            action_label=name,
+            resource_instance_lifecycle=lifecycle,
+            is_initial_state=is_initial_state,
+        )
+
+    @staticmethod
+    def make_graph(slug, lifecycle):
+        return GraphModel.objects.create(
+            name=slug,
+            slug=slug,
+            isresource=True,
+            resource_instance_lifecycle=lifecycle,
+        )
+
     @classmethod
-    def make_resource(cls, values):
-        resource = ResourceInstance.objects.create(graph=cls.graph)
-        if values is not None:
-            values = {
-                language: {"value": value, "direction": "ltr"}
-                for language, value in values.items()
-            }
+    def make_resource(cls, graph, state):
+        resource = ResourceInstance.objects.create(
+            graph=graph, resource_instance_lifecycle_state=state
+        )
         TileModel.objects.create(
-            resourceinstance=resource,
-            nodegroup=cls.nodegroup,
-            data={str(cls.string_node.pk): values},
-            sortorder=0,
+            resourceinstance=resource, nodegroup=cls.nodegroup, data={}, sortorder=0
         )
         return resource
 
-    def make_substring_rule(self, substring, nodeid=None):
+    def make_lifecycle_rule(self, state=None, graph=None):
         return make_rule(
-            modulename="string_substring_rule.py",
-            classname="StringSubstringRule",
+            modulename="lifecycle_state_rule.py",
+            classname="LifecycleStateRule",
             definition={
-                "nodeid": str(nodeid or self.string_node.pk),
-                "substring": substring,
+                "graphid": str((graph or self.graph).pk),
+                "lifecycle_state_id": str((state or self.active_state).pk),
             },
         )
 
 
-class StringSubstringRuleTests(StringNodeTestCase):
+class LifecycleStateRuleTests(LifecycleTestCase):
     def matching_resources(self, rule):
         return set(rule.get_class_module().get_matching_resources(rule))
 
     def test_get_class_module(self):
-        rule = self.make_substring_rule("getty")
-        self.assertIs(rule.get_class_module(), StringSubstringRule)
+        rule = self.make_lifecycle_rule()
+        self.assertIs(rule.get_class_module(), LifecycleStateRule)
 
-    def test_case_insensitive_match_in_any_language(self):
-        rule = self.make_substring_rule("gEtTy")
+    def test_matches_graph_and_state(self):
         self.assertEqual(
-            self.matching_resources(rule), {self.matching, self.other_language}
-        )
-
-    def test_matches_inner_substring(self):
-        rule = self.make_substring_rule("villa")
-        self.assertEqual(self.matching_resources(rule), {self.matching})
-
-    def test_like_wildcards_are_literal(self):
-        self.assertEqual(
-            self.matching_resources(self.make_substring_rule("%")), {self.wildcards}
+            self.matching_resources(self.make_lifecycle_rule()),
+            {self.matching, self.also_matching},
         )
         self.assertEqual(
-            self.matching_resources(self.make_substring_rule("0%_d")), {self.wildcards}
+            self.matching_resources(self.make_lifecycle_rule(self.draft_state)),
+            {self.non_matching},
         )
         self.assertEqual(
-            self.matching_resources(self.make_substring_rule("_")), {self.wildcards}
+            self.matching_resources(self.make_lifecycle_rule(graph=self.other_graph)),
+            {self.other_graph_active},
         )
 
     def test_matches_resource(self):
-        rule = self.make_substring_rule("getty")
-        self.assertTrue(StringSubstringRule.matches_resource(rule, self.matching))
+        rule = self.make_lifecycle_rule()
+        self.assertTrue(LifecycleStateRule.matches_resource(rule, self.matching))
+        self.assertFalse(LifecycleStateRule.matches_resource(rule, self.non_matching))
         self.assertFalse(
-            StringSubstringRule.matches_resource(rule, self.non_matching)
+            LifecycleStateRule.matches_resource(rule, self.other_graph_active)
         )
-        self.assertFalse(StringSubstringRule.matches_resource(rule, self.null_value))
 
-    def test_search_rule_url_is_false(self):
-        self.assertIs(self.make_substring_rule("getty").get_search_rule_url(), False)
+    def test_search_rule_url(self):
+        url = self.make_lifecycle_rule().get_search_rule_url()
+        self.assertTrue(url.startswith("/search?"))
+        self.assertIn(f"%22graphid%22%3A%20%22{self.graph.pk}%22", url)
+        self.assertIn(f"%22id%22%3A%20%22{self.active_state.pk}%22", url)
 
     def test_invalid_definitions(self):
+        graphid = str(self.graph.pk)
+        stateid = str(self.active_state.pk)
         for definition in (
             {},
-            {"nodeid": str(self.string_node.pk)},
-            {"nodeid": str(self.string_node.pk), "substring": ""},
-            {"nodeid": str(self.number_node.pk), "substring": "getty"},
-            {"nodeid": str(uuid.uuid4()), "substring": "getty"},
-            {"nodeid": "not-a-uuid", "substring": "getty"},
+            {"graphid": graphid},
+            {"lifecycle_state_id": stateid},
+            {"graphid": str(uuid.uuid4()), "lifecycle_state_id": stateid},
+            {"graphid": "not-a-uuid", "lifecycle_state_id": stateid},
+            {"graphid": str(self.branch.pk), "lifecycle_state_id": stateid},
+            {"graphid": graphid, "lifecycle_state_id": str(uuid.uuid4())},
+            {"graphid": graphid, "lifecycle_state_id": "not-a-uuid"},
+            {
+                "graphid": graphid,
+                "lifecycle_state_id": str(self.other_lifecycle_state.pk),
+            },
         ):
             with self.subTest(definition=definition):
                 rule = make_rule(
-                    modulename="string_substring_rule.py",
-                    classname="StringSubstringRule",
+                    modulename="lifecycle_state_rule.py",
+                    classname="LifecycleStateRule",
                     definition=definition,
                 )
                 with self.assertRaises(ValidationError):
-                    StringSubstringRule.get_matching_resources(rule)
+                    LifecycleStateRule.get_matching_resources(rule)
 
 
 class InclusionRuleGroupPermissionTests(TestCase):
@@ -199,16 +224,16 @@ class InclusionRuleGroupPermissionTests(TestCase):
         self.assertEqual(list(self.rule.group_permissions.all()), [grant])
 
 
-class AbacRuleEvaluationTests(StringNodeTestCase):
+class AbacRuleEvaluationTests(LifecycleTestCase):
     def setUp(self):
         self.framework = ArchesAbacPermissionFramework()
-        self.group = Group.objects.create(name="Getty readers")
+        self.group = Group.objects.create(name="Active readers")
         self.user = User.objects.create(username="reader")
         self.user.groups.add(self.group)
         self.user.user_permissions.add(
             Permission.objects.get(codename="read_nodegroup")
         )
-        self.grant(self.make_substring_rule("getty"), "view_resourceinstance")
+        self.grant(self.make_lifecycle_rule(), "view_resourceinstance")
 
     def grant(self, rule, *codenames, group=None):
         grant = InclusionRuleGroupPermission.objects.create(
@@ -237,9 +262,9 @@ class AbacRuleEvaluationTests(StringNodeTestCase):
         )
 
     def test_rules_of_other_groups_do_not_apply(self):
-        other_group = Group.objects.create(name="Villa editors")
+        other_group = Group.objects.create(name="Active editors")
         self.grant(
-            self.make_substring_rule("villa"),
+            self.make_lifecycle_rule(),
             "change_resourceinstance",
             group=other_group,
         )
@@ -275,7 +300,7 @@ class AbacRuleEvaluationTests(StringNodeTestCase):
         filtered = self.framework.filter_resource_queryset(
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
-        self.assertEqual(set(filtered), {self.matching, self.other_language})
+        self.assertEqual(set(filtered), {self.matching, self.also_matching})
 
     def test_filter_resource_queryset_by_other_field(self):
         filtered = self.framework.filter_resource_queryset(
@@ -285,7 +310,7 @@ class AbacRuleEvaluationTests(StringNodeTestCase):
         )
         self.assertEqual(
             {tile.resourceinstance_id for tile in filtered},
-            {self.matching.pk, self.other_language.pk},
+            {self.matching.pk, self.also_matching.pk},
         )
 
     def test_filter_resource_queryset_only_granted_permission(self):
@@ -304,7 +329,7 @@ class AbacRuleEvaluationTests(StringNodeTestCase):
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
         self.assertEqual(
-            set(filtered), {self.matching, self.other_language, self.non_matching}
+            set(filtered), {self.matching, self.also_matching, self.non_matching}
         )
 
     def test_filter_resource_queryset_ignores_unevaluated_rules(self):
@@ -315,4 +340,4 @@ class AbacRuleEvaluationTests(StringNodeTestCase):
         filtered = self.framework.filter_resource_queryset(
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
-        self.assertEqual(set(filtered), {self.matching, self.other_language})
+        self.assertEqual(set(filtered), {self.matching, self.also_matching})
