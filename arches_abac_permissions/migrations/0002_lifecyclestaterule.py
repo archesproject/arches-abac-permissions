@@ -9,7 +9,7 @@ class Migration(migrations.Migration):
 
     operations = [
         migrations.CreateModel(
-            name="StringSubstringRule",
+            name="LifecycleStateRule",
             fields=[],
             options={"proxy": True, "indexes": [], "constraints": []},
             bases=("arches_abac_permissions.inclusionrule",),
