@@ -27,7 +27,13 @@ class InclusionRule(models.Model):
         )
 
     def get_search_rule_url(self):
-        return self.get_class_module().do_get_search_rule_url(self)
+        return self.get_class_module().get_search_rule_url(self)
+
+    def matches_resource(self, resource):
+        return self.get_class_module().matches_resource(self, resource)
+
+    def get_matching_resources(self):
+        return self.get_class_module().get_matching_resources(self)
 
     def __str__(self):
         return self.name
