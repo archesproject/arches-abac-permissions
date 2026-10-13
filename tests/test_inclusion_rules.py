@@ -341,3 +341,83 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
         self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+    # A rule that cannot be evaluated matches nothing and breaks nothing.
+    framework_logger = (
+        "arches_abac_permissions.permissions.arches_abac_permission_framework"
+    )
+
+    def broken_rules(self):
+        return [
+            make_rule(modulename="lifecycle_state_rule.py", classname="Missing"),
+            make_rule(
+                modulename="lifecycle_state_rule.py",
+                classname="LifecycleStateRule",
+                definition={},
+            ),
+        ]
+
+    def test_get_perms_ignores_broken_rule(self):
+        for rule in self.broken_rules():
+            with self.subTest(rule=rule.classname):
+                self.grant(rule, "change_resourceinstance")
+                with self.assertLogs(self.framework_logger, "ERROR"):
+                    perms = self.framework.get_perms(self.user, self.matching)
+                self.assertIn("view_resourceinstance", perms)
+                self.assertNotIn("change_resourceinstance", perms)
+
+    def test_filter_resource_queryset_ignores_broken_rule(self):
+        for rule in self.broken_rules():
+            with self.subTest(rule=rule.classname):
+                self.grant(rule, "view_resourceinstance")
+                with self.assertLogs(self.framework_logger, "ERROR"):
+                    filtered = self.framework.filter_resource_queryset(
+                        self.user, ResourceInstance.objects.filter(graph=self.graph)
+                    )
+                self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+
+class InclusionRuleValidationTests(LifecycleTestCase):
+    def assertInvalid(self, rule, field):
+        with self.assertRaises(ValidationError) as cm:
+            rule.clean()
+        if field:
+            self.assertIn(field, cm.exception.message_dict)
+
+    def test_valid_rule(self):
+        self.make_lifecycle_rule().clean()
+
+    def test_rule_class_without_definition_checks(self):
+        make_rule(modulename="search_rule.py", classname="SearchRule").clean()
+
+    def test_missing_rule_class(self):
+        self.assertInvalid(make_rule(), None)
+        self.assertInvalid(make_rule(modulename="search_rule.py"), None)
+
+    def test_unknown_rule_class(self):
+        self.assertInvalid(
+            make_rule(modulename="lifecycle_state_rule.py", classname="Missing"),
+            "classname",
+        )
+        self.assertInvalid(
+            make_rule(modulename="missing_rule.py", classname="MissingRule"),
+            "classname",
+        )
+
+    def test_name_in_module_that_is_not_a_rule_class(self):
+        for classname in ("GraphModel", "urlencode", "json"):
+            with self.subTest(classname=classname):
+                self.assertInvalid(
+                    make_rule(
+                        modulename="lifecycle_state_rule.py", classname=classname
+                    ),
+                    "classname",
+                )
+
+    def test_invalid_definition(self):
+        rule = make_rule(
+            modulename="lifecycle_state_rule.py",
+            classname="LifecycleStateRule",
+            definition={"graphid": str(self.graph.pk)},
+        )
+        self.assertInvalid(rule, "definition")
