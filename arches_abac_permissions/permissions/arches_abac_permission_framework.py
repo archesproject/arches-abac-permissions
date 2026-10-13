@@ -16,6 +16,7 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 from __future__ import annotations
 
 import logging
+from typing import TYPE_CHECKING, Iterable
 
 from django.contrib.auth.models import Group, User
 from django.db import DatabaseError
@@ -25,8 +26,10 @@ from arches.app.models.models import ResourceInstance
 from arches.app.permissions.arches_default_deny import (
     ArchesDefaultDenyPermissionFramework,
 )
-from arches.app.search.elasticsearch_dsl_builder import Bool
-from arches.app.search.search import SearchEngine
+from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
+
+if TYPE_CHECKING:
+    from arches.app.models.resource import Resource
 
 logger = logging.getLogger(__name__)
 
@@ -42,8 +45,9 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
     the single-resource checks (``user_can_read_resource``,
     ``user_can_edit_resource``, ``user_can_delete_resource``,
     ``has_group_perm``), and in ``filter_resource_queryset``, which drives
-    SQL-based search such as arches-search. Elasticsearch results are not yet
-    filtered by rules.
+    SQL-based search such as arches-search. For Elasticsearch, ``get_index_values``
+    adds the groups of matching grants to a resource's indexed ``groups_read`` and
+    ``groups_edit``, which the default-deny search filters already check.
     """
 
     def get_groups(self, user_or_group: User | Group | None):
@@ -75,8 +79,6 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         Return the permission codenames that ``user_or_group`` is granted on
         ``obj`` by the inclusion rules assigned to its groups.
         """
-        from arches_abac_permissions.models import InclusionRuleGroupPermission
-
         grants = (
             InclusionRuleGroupPermission.objects.filter(
                 group__in=self.get_groups(user_or_group)
@@ -100,8 +102,6 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         ``permission`` (a codename, optionally prefixed "app_label.") by the
         inclusion rules assigned to its groups.
         """
-        from arches_abac_permissions.models import InclusionRule
-
         app_label, _, codename = permission.rpartition(".")
         grant_filter = Q(
             group_permissions__group__in=self.get_groups(user),
@@ -148,22 +148,30 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
             | Q(**{f"{resourceinstance_field}__in": abac_permitted.values("pk")})
         )
 
-    def get_filtered_instances(
-        self,
-        user: User,
-        search_engine: SearchEngine | None = None,
-        allresources: bool = False,
-        resources: list[str] | None = None,
+    def get_index_values(
+        self, resource: Resource, *, all_users: Iterable[User] = User.objects.none()
     ):
-        # TODO: merge in resources granted via ABAC rules once implemented.
-        return super().get_filtered_instances(
-            user, search_engine, allresources, resources
-        )
-
-    def get_permission_search_filter(self, user: User) -> Bool:
-        # TODO: OR in an ABAC-derived search filter once rule evaluation
-        # exists.
-        return super().get_permission_search_filter(user)
+        permissions = super().get_index_values(resource, all_users=all_users)
+        read = set(permissions["groups_read"])
+        edit = set(permissions["groups_edit"])
+        grants = InclusionRuleGroupPermission.objects.select_related(
+            "rule"
+        ).prefetch_related("permissions")
+        for grant in grants:
+            codenames = {permission.codename for permission in grant.permissions.all()}
+            if not codenames & {"view_resourceinstance", "change_resourceinstance"}:
+                continue
+            if not self.evaluate_rule(
+                grant.rule, lambda r: r.matches_resource(resource), default=False
+            ):
+                continue
+            if "view_resourceinstance" in codenames:
+                read.add(grant.group_id)
+            if "change_resourceinstance" in codenames:
+                edit.add(grant.group_id)
+        permissions["groups_read"] = sorted(read)
+        permissions["groups_edit"] = sorted(edit)
+        return permissions
 
     def get_perms(
         self, user_or_group: User | Group, obj: ResourceInstance

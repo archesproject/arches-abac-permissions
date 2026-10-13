@@ -104,7 +104,7 @@ When Arches checks a user's permissions on a single resource instance (viewing i
 
 Things to be aware of:
 
-- **SQL-based search (arches-search) honors inclusion rules; Elasticsearch search does not yet.** Rules apply to single-resource permission checks and to `filter_resource_queryset`, which arches-search uses. Resources a user can access through a rule will not yet appear in core Arches search results or on the search map.
+- **Search honors inclusion rules.** SQL-based search (arches-search) filters through `filter_resource_queryset`. For Elasticsearch, when a resource is indexed, the groups of every grant whose rule matches it are added to its indexed `groups_read` (view) and `groups_edit` (change). Core search, the search map and related resources already filter on these. A resource is re-indexed when it is saved, and the resources a rule matches are re-indexed when its definition or grants are changed in the admin. After changing rules or grants in code, run `python manage.py reindex_rule <rule id>`. That re-indexes what the rule matches now; if a definition change means it no longer matches some resources, run `python manage.py es reindex_database` to clear their groups. After first installing this version, run `python manage.py es reindex_database` once.
 - **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser account.
 - **Users also need the model-level `read_nodegroup` permission** ("Models | node group | Read") to read a resource. Arches requires this in addition to resource-instance permissions.
 - A group permission with no permissions selected grants nothing, and its rule is not evaluated.
