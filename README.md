@@ -76,6 +76,25 @@ pip install -e arches-abac-permissions --group dev
 
     `PERMISSION_FRAMEWORK` is often also set in `settings_local.py`. Check that it isn't overridden there.
 
+    Replace core's term suggestions, so the search box doesn't suggest values from resources a user can't see. Core's suggestions read a separate index that has no resource permissions; this replacement searches resources under the permission filter. `manage.py check` warns (`arches_abac_permissions.W001`) while core's is still configured:
+
+    ```python
+    TERM_SEARCH_TYPES = [
+        {
+            "type": "term",
+            "label": _("Term Matches"),
+            "key": "terms",
+            "module": "arches_abac_permissions.permitted_term_search.PermittedTermSearch",
+        },
+        {
+            "type": "concept",
+            "label": _("Concepts"),
+            "key": "concepts",
+            "module": "arches.app.search.concept_search.ConceptSearch",
+        },
+    ]
+    ```
+
 3. Run migrations:
 
     ```bash
