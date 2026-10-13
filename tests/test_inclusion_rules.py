@@ -1,9 +1,14 @@
+import io
+import json
 import uuid
+from unittest import mock
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
+from django.core.management import call_command
 from django.db import IntegrityError, transaction
 from django.test import TestCase
+from django.urls import reverse
 
 from arches.app.models.models import (
     GraphModel,
@@ -14,6 +19,7 @@ from arches.app.models.models import (
     ResourceInstanceLifecycleState,
     TileModel,
 )
+from arches.app.models.resource import Resource
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.permissions.arches_abac_permission_framework import (
     ArchesAbacPermissionFramework,
@@ -341,3 +347,193 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
         self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+    # A rule that cannot be evaluated matches nothing and breaks nothing.
+    framework_logger = (
+        "arches_abac_permissions.permissions.arches_abac_permission_framework"
+    )
+
+    def broken_rules(self):
+        return [
+            make_rule(modulename="lifecycle_state_rule.py", classname="Missing"),
+            make_rule(
+                modulename="lifecycle_state_rule.py",
+                classname="LifecycleStateRule",
+                definition={},
+            ),
+        ]
+
+    def test_get_perms_ignores_broken_rule(self):
+        for rule in self.broken_rules():
+            with self.subTest(rule=rule.classname):
+                self.grant(rule, "change_resourceinstance")
+                with self.assertLogs(self.framework_logger, "ERROR"):
+                    perms = self.framework.get_perms(self.user, self.matching)
+                self.assertIn("view_resourceinstance", perms)
+                self.assertNotIn("change_resourceinstance", perms)
+
+    def test_filter_resource_queryset_ignores_broken_rule(self):
+        for rule in self.broken_rules():
+            with self.subTest(rule=rule.classname):
+                self.grant(rule, "view_resourceinstance")
+                with self.assertLogs(self.framework_logger, "ERROR"):
+                    filtered = self.framework.filter_resource_queryset(
+                        self.user, ResourceInstance.objects.filter(graph=self.graph)
+                    )
+                self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+    def index_values(self, resource):
+        return self.framework.get_index_values(Resource.objects.get(pk=resource.pk))
+
+    def test_index_values_add_groups_of_matching_grants(self):
+        editors = Group.objects.create(name="Active editors")
+        self.grant(self.make_lifecycle_rule(), "change_resourceinstance", group=editors)
+
+        values = self.index_values(self.matching)
+        self.assertEqual(values["groups_read"], [self.group.pk])
+        self.assertEqual(values["groups_edit"], [editors.pk])
+
+        values = self.index_values(self.non_matching)
+        self.assertEqual(values["groups_read"], [])
+        self.assertEqual(values["groups_edit"], [])
+
+    def test_index_values_ignore_broken_rule(self):
+        broken = Group.objects.create(name="Broken")
+        for rule in self.broken_rules():
+            with self.subTest(rule=rule.classname):
+                self.grant(rule, "view_resourceinstance", group=broken)
+                with self.assertLogs(self.framework_logger, "ERROR"):
+                    values = self.index_values(self.matching)
+                self.assertEqual(values["groups_read"], [self.group.pk])
+
+
+class ReindexOnRuleChangeTests(LifecycleTestCase):
+    def setUp(self):
+        self.superuser = User.objects.create(
+            username="superuser", is_superuser=True, is_staff=True
+        )
+        self.client.force_login(self.superuser)
+        self.group = Group.objects.create(name="Readers")
+        self.view = Permission.objects.get(codename="view_resourceinstance")
+        self.rule = self.make_lifecycle_rule()
+        self.grant = InclusionRuleGroupPermission.objects.create(
+            rule=self.rule, group=self.group
+        )
+        self.grant.permissions.add(self.view)
+        self.active_matches = {self.matching.pk, self.also_matching.pk}
+
+    def reindexed(self, url, data):
+        with mock.patch("arches_abac_permissions.admin.reindex_resources") as reindex:
+            with self.captureOnCommitCallbacks(execute=True):
+                response = self.client.post(url, data)
+        if response.status_code != 302:
+            form = response.context["adminform"].form
+            inlines = [
+                f.formset.errors for f in response.context["inline_admin_formsets"]
+            ]
+            self.fail(f"{form.errors} {inlines}")
+        return set(reindex.call_args.args[0]) if reindex.called else None
+
+    def change(self, definition=None, name="rule", grant=None):
+        url = reverse(
+            "admin:arches_abac_permissions_inclusionrule_change", args=[self.rule.pk]
+        )
+        prefix = "group_permissions-0-"
+        grant = {"group": self.group.pk, "permissions": [self.view.pk], **(grant or {})}
+        data = {
+            "name": name,
+            "modulename": self.rule.modulename,
+            "classname": self.rule.classname,
+            "definition": json.dumps(definition or self.rule.definition),
+            "owner": self.superuser.pk,
+            "group_permissions-TOTAL_FORMS": 1,
+            "group_permissions-INITIAL_FORMS": 1,
+            "group_permissions-MIN_NUM_FORMS": 0,
+            "group_permissions-MAX_NUM_FORMS": 1000,
+            prefix + "id": self.grant.pk,
+            prefix + "rule": self.rule.pk,
+            **{prefix + key: value for key, value in grant.items()},
+        }
+        return self.reindexed(url, data)
+
+    def test_changing_grant_permissions_reindexes_rule_matches(self):
+        change = Permission.objects.get(codename="change_resourceinstance")
+        self.assertEqual(
+            self.change(grant={"permissions": [self.view.pk, change.pk]}),
+            self.active_matches,
+        )
+
+    def test_deleting_grant_reindexes_previous_matches(self):
+        self.assertEqual(self.change(grant={"DELETE": "on"}), self.active_matches)
+
+    def test_editing_definition_reindexes_old_and_new_matches(self):
+        definition = {
+            **self.rule.definition,
+            "lifecycle_state_id": str(self.draft_state.pk),
+        }
+        self.assertEqual(
+            self.change(definition=definition),
+            self.active_matches | {self.non_matching.pk},
+        )
+
+    def test_renaming_rule_does_not_reindex(self):
+        self.assertIsNone(self.change(name="renamed"))
+
+    def test_deleting_rule_reindexes_its_matches(self):
+        url = reverse(
+            "admin:arches_abac_permissions_inclusionrule_delete", args=[self.rule.pk]
+        )
+        self.assertEqual(self.reindexed(url, {"post": "yes"}), self.active_matches)
+
+    def test_command_reindexes_rule_matches(self):
+        with mock.patch(
+            "arches_abac_permissions.management.commands.reindex_rule.reindex_resources"
+        ) as reindex:
+            call_command("reindex_rule", str(self.rule.pk), stdout=io.StringIO())
+        self.assertEqual(set(reindex.call_args.args[0]), self.active_matches)
+
+
+class InclusionRuleValidationTests(LifecycleTestCase):
+    def assertInvalid(self, rule, field):
+        with self.assertRaises(ValidationError) as cm:
+            rule.clean()
+        if field:
+            self.assertIn(field, cm.exception.message_dict)
+
+    def test_valid_rule(self):
+        self.make_lifecycle_rule().clean()
+
+    def test_rule_class_without_definition_checks(self):
+        make_rule(modulename="search_rule.py", classname="SearchRule").clean()
+
+    def test_missing_rule_class(self):
+        self.assertInvalid(make_rule(), None)
+        self.assertInvalid(make_rule(modulename="search_rule.py"), None)
+
+    def test_unknown_rule_class(self):
+        self.assertInvalid(
+            make_rule(modulename="lifecycle_state_rule.py", classname="Missing"),
+            "classname",
+        )
+        self.assertInvalid(
+            make_rule(modulename="missing_rule.py", classname="MissingRule"),
+            "classname",
+        )
+
+    def test_name_in_module_that_is_not_a_rule_class(self):
+        for classname in ("GraphModel", "urlencode", "json"):
+            with self.subTest(classname=classname):
+                self.assertInvalid(
+                    make_rule(
+                        modulename="lifecycle_state_rule.py", classname=classname
+                    ),
+                    "classname",
+                )
+
+    def test_invalid_definition(self):
+        rule = make_rule(
+            modulename="lifecycle_state_rule.py",
+            classname="LifecycleStateRule",
+            definition={"graphid": str(self.graph.pk)},
+        )
+        self.assertInvalid(rule, "definition")

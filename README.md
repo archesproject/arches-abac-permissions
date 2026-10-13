@@ -76,6 +76,25 @@ pip install -e arches-abac-permissions --group dev
 
     `PERMISSION_FRAMEWORK` is often also set in `settings_local.py`. Check that it isn't overridden there.
 
+    Replace core's term suggestions, so the search box doesn't suggest values from resources a user can't see. Core's suggestions read a separate index that has no resource permissions; this replacement searches resources under the permission filter. `manage.py check` warns (`arches_abac_permissions.W001`) while core's is still configured:
+
+    ```python
+    TERM_SEARCH_TYPES = [
+        {
+            "type": "term",
+            "label": _("Term Matches"),
+            "key": "terms",
+            "module": "arches_abac_permissions.permitted_term_search.PermittedTermSearch",
+        },
+        {
+            "type": "concept",
+            "label": _("Concepts"),
+            "key": "concepts",
+            "module": "arches.app.search.concept_search.ConceptSearch",
+        },
+    ]
+    ```
+
 3. Run migrations:
 
     ```bash
@@ -104,7 +123,7 @@ When Arches checks a user's permissions on a single resource instance (viewing i
 
 Things to be aware of:
 
-- **SQL-based search (arches-search) honors inclusion rules; Elasticsearch search does not yet.** Rules apply to single-resource permission checks and to `filter_resource_queryset`, which arches-search uses. Resources a user can access through a rule will not yet appear in core Arches search results or on the search map.
+- **Search honors inclusion rules.** SQL-based search (arches-search) filters through `filter_resource_queryset`. For Elasticsearch, when a resource is indexed, the groups of every grant whose rule matches it are added to its indexed `groups_read` (view) and `groups_edit` (change). Core search, the search map and related resources already filter on these. A resource is re-indexed when it is saved, and the resources a rule matches are re-indexed when its definition or grants are changed in the admin. After changing rules or grants in code, run `python manage.py reindex_rule <rule id>`. That re-indexes what the rule matches now; if a definition change means it no longer matches some resources, run `python manage.py es reindex_database` to clear their groups. After first installing this version, run `python manage.py es reindex_database` once.
 - **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser account.
 - **Users also need the model-level `read_nodegroup` permission** ("Models | node group | Read") to read a resource. Arches requires this in addition to resource-instance permissions.
 - A group permission with no permissions selected grants nothing, and its rule is not evaluated.
@@ -202,7 +221,8 @@ If the rule has no effect, check that:
 - the user is in the group and is not a superuser;
 - the group permission has at least one permission chosen;
 - the user has the `read_nodegroup` permission;
-- `RULE_LOCATIONS` is defined in your settings. If it's missing, loading the rule fails with `AttributeError: 'Settings' object has no attribute 'RULE_LOCATIONS'`.
+- `RULE_LOCATIONS` is defined in your settings. If it's missing, loading the rule fails with `AttributeError: 'Settings' object has no attribute 'RULE_LOCATIONS'`;
+- the logs don't show `Inclusion rule ... could not be evaluated`. A rule that can't be evaluated, for example because its graph was deleted, is treated as matching nothing, so it grants nothing but doesn't break other permissions.
 
 ## Adding custom rules to your project
 
@@ -245,6 +265,13 @@ class MyRule(InclusionRule):
         # Return True if `resource` matches the rule. Used for
         # single-resource checks; usually
         # cls.get_matching_resources(inclusion_rule).filter(pk=resource.pk).exists()
+        ...
+
+    @classmethod
+    def validate_definition(cls, inclusion_rule):
+        # Raise ValidationError if inclusion_rule.definition is invalid. It is
+        # called when the rule is saved in the admin, so mistakes are caught
+        # before the rule is used. Optional; the default accepts anything.
         ...
 
     class Meta:

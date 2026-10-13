@@ -97,7 +97,19 @@ ELASTICSEARCH_CUSTOM_INDEXES = [
 #     'should_update_asynchronously': False  <-- denotes if asynchronously updating the index would affect custom functionality within the project.
 # })
 
-TERM_SEARCH_TYPES = list(TERM_SEARCH_TYPES) + [
+TERM_SEARCH_TYPES = [
+    {
+        "type": "term",
+        "label": _("Term Matches"),
+        "key": "terms",
+        "module": "arches_abac_permissions.permitted_term_search.PermittedTermSearch",
+    },
+    {
+        "type": "concept",
+        "label": _("Concepts"),
+        "key": "concepts",
+        "module": "arches.app.search.concept_search.ConceptSearch",
+    },
     {
         "type": "reference",
         "label": _("References"),
