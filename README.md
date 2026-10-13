@@ -202,7 +202,8 @@ If the rule has no effect, check that:
 - the user is in the group and is not a superuser;
 - the group permission has at least one permission chosen;
 - the user has the `read_nodegroup` permission;
-- `RULE_LOCATIONS` is defined in your settings. If it's missing, loading the rule fails with `AttributeError: 'Settings' object has no attribute 'RULE_LOCATIONS'`.
+- `RULE_LOCATIONS` is defined in your settings. If it's missing, loading the rule fails with `AttributeError: 'Settings' object has no attribute 'RULE_LOCATIONS'`;
+- the logs don't show `Inclusion rule ... could not be evaluated`. A rule that can't be evaluated, for example because its graph was deleted, is treated as matching nothing, so it grants nothing but doesn't break other permissions.
 
 ## Adding custom rules to your project
 
@@ -245,6 +246,13 @@ class MyRule(InclusionRule):
         # Return True if `resource` matches the rule. Used for
         # single-resource checks; usually
         # cls.get_matching_resources(inclusion_rule).filter(pk=resource.pk).exists()
+        ...
+
+    @classmethod
+    def validate_definition(cls, inclusion_rule):
+        # Raise ValidationError if inclusion_rule.definition is invalid. It is
+        # called when the rule is saved in the admin, so mistakes are caught
+        # before the rule is used. Optional; the default accepts anything.
         ...
 
     class Meta:
