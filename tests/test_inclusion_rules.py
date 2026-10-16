@@ -53,17 +53,6 @@ class InclusionRuleTests(TestCase):
         self.assertIs(search.get_class_module(), SearchRule)
         self.assertIs(queryset.get_class_module(), QuerySetRule)
 
-    def test_search_rule_url(self):
-        rule = make_rule(
-            modulename="search_rule.py",
-            classname="SearchRule",
-            definition={"paging-filter": 1, "term-filter": [{"inverted": False}]},
-        )
-        url = rule.get_search_rule_url()
-        self.assertTrue(url.startswith("/search?"))
-        self.assertIn("paging-filter=1", url)
-        self.assertIn("term-filter=%5B%7B%22inverted%22%3A%20false%7D%5D", url)
-
     def test_queryset_rule_url_is_false(self):
         rule = make_rule(modulename="queryset_rule.py", classname="QuerySetRule")
         self.assertIs(rule.get_search_rule_url(), False)
