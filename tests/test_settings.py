@@ -90,3 +90,5 @@ if importlib.util.find_spec("arches_resource_sets"):
         + ("arches_resource_sets",)
         + INSTALLED_APPS[_after_abac:]
     )
+
+RULE_LOCATIONS = ["tests.rules"]
