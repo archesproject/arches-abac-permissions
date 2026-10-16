@@ -334,7 +334,7 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
 
     def test_filter_resource_queryset_ignores_unevaluated_rules(self):
         self.grant(
-            make_rule(modulename="search_rule.py", classname="SearchRule"),
+            make_rule(modulename="queryset_rule.py", classname="QuerySetRule"),
             "view_resourceinstance",
         )
         filtered = self.framework.filter_resource_queryset(
@@ -388,7 +388,7 @@ class InclusionRuleValidationTests(LifecycleTestCase):
         self.make_lifecycle_rule().clean()
 
     def test_rule_class_without_definition_checks(self):
-        make_rule(modulename="search_rule.py", classname="SearchRule").clean()
+        make_rule(modulename="no_checks_rule.py", classname="NoChecksRule").clean()
 
     def test_missing_rule_class(self):
         self.assertInvalid(make_rule(), None)

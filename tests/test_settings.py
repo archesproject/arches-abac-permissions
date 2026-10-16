@@ -80,3 +80,5 @@ SILENCED_SYSTEM_CHECKS.append(
 ELASTICSEARCH_HOSTS = [
     {"scheme": "http", "host": "localhost", "port": ELASTICSEARCH_HTTP_PORT}
 ]
+
+RULE_LOCATIONS = ["tests.rules"]
