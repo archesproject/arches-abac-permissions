@@ -83,12 +83,14 @@ ELASTICSEARCH_HOSTS = [
 ]
 
 # Optional rule dependencies: their tests skip when the package is not installed.
-if importlib.util.find_spec("arches_resource_sets"):
-    _after_abac = INSTALLED_APPS.index("arches_abac_permissions") + 1
-    INSTALLED_APPS = (
-        INSTALLED_APPS[:_after_abac]
-        + ("arches_resource_sets",)
-        + INSTALLED_APPS[_after_abac:]
-    )
+_optional_apps = tuple(
+    app
+    for app in ("arches_search", "arches_resource_sets", "arches_modular_reports")
+    if importlib.util.find_spec(app)
+)
+_after_abac = INSTALLED_APPS.index("arches_abac_permissions") + 1
+INSTALLED_APPS = (
+    INSTALLED_APPS[:_after_abac] + _optional_apps + INSTALLED_APPS[_after_abac:]
+)
 
 RULE_LOCATIONS = ["tests.rules"]

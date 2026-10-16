@@ -29,10 +29,12 @@ version = "0.1.0a0"
 
 [project.optional-dependencies]
 arches-resource-sets = ["arches-resource-sets>=0.1.0a4"]
+arches-search = ["arches-search>=0.1.0a20"]
 
 [dependency-groups]
 dev = [
     "arches-resource-sets>=0.1.0a4",
+    "arches-search>=0.1.0a20",
     "black==26.3.1",
     "coverage",
     "django-silk==5.5.0",
