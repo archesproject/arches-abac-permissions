@@ -80,3 +80,12 @@ SILENCED_SYSTEM_CHECKS.append(
 ELASTICSEARCH_HOSTS = [
     {"scheme": "http", "host": "localhost", "port": ELASTICSEARCH_HTTP_PORT}
 ]
+
+_after_abac = INSTALLED_APPS.index("arches_abac_permissions") + 1
+INSTALLED_APPS = (
+    INSTALLED_APPS[:_after_abac]
+    + ("arches_search", "arches_resource_sets", "arches_modular_reports")
+    + INSTALLED_APPS[_after_abac:]
+)
+
+RULE_LOCATIONS = ["tests.rules"]
