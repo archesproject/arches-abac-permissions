@@ -16,6 +16,7 @@ You should have received a copy of the GNU Affero General Public License
 along with this program. If not, see <http://www.gnu.org/licenses/>.
 """
 
+import importlib.util
 import os
 
 from arches_abac_permissions.settings import *
@@ -80,3 +81,12 @@ SILENCED_SYSTEM_CHECKS.append(
 ELASTICSEARCH_HOSTS = [
     {"scheme": "http", "host": "localhost", "port": ELASTICSEARCH_HTTP_PORT}
 ]
+
+# Optional rule dependencies: their tests skip when the package is not installed.
+if importlib.util.find_spec("arches_resource_sets"):
+    _after_abac = INSTALLED_APPS.index("arches_abac_permissions") + 1
+    INSTALLED_APPS = (
+        INSTALLED_APPS[:_after_abac]
+        + ("arches_resource_sets",)
+        + INSTALLED_APPS[_after_abac:]
+    )
