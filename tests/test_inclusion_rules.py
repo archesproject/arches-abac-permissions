@@ -414,6 +414,18 @@ class InclusionRuleValidationTests(LifecycleTestCase):
                     "classname",
                 )
 
+    def test_definition_not_an_object(self):
+        for definition in ([], "x", 1):
+            with self.subTest(definition=definition):
+                self.assertInvalid(
+                    make_rule(
+                        modulename="lifecycle_state_rule.py",
+                        classname="LifecycleStateRule",
+                        definition=definition,
+                    ),
+                    "definition",
+                )
+
     def test_invalid_definition(self):
         rule = make_rule(
             modulename="lifecycle_state_rule.py",
