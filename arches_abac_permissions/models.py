@@ -55,6 +55,10 @@ class InclusionRule(models.Model):
                     % {"classname": self.classname, "modulename": self.modulename}
                 }
             )
+        if not isinstance(self.definition, dict):
+            raise ValidationError(
+                {"definition": _("The definition must be a JSON object.")}
+            )
         try:
             rule_class.validate_definition(self)
         except ValidationError as e:
