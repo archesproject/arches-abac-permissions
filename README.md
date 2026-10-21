@@ -90,7 +90,32 @@ pip install -e arches-abac-permissions --group dev
 
 5. Restart your server.
 
-The package has no URLs or front-end assets of its own, so no changes are needed to `urls.py` or `package.json`.
+6. Add the rule permissions URLs to your project's `urls.py`, before the Arches core URLs:
+
+    ```python
+    urlpatterns = [
+        # project-level urls
+        path("", include("arches_abac_permissions.api_urls")),
+        path("", include("arches.urls")),
+    ]
+    ```
+
+7. Build the front end so the **Rule Permissions** plugin is bundled. Add the package to your project's `package.json` the same way as other Arches applications, then:
+
+    ```bash
+    npm install
+    npm run build_development
+    ```
+
+## Rule Permissions plugin
+
+Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
+
+- **Rules** (left): filter, add, and delete rules.
+- **Rule Configuration** (middle): name, description, resource model and lifecycle state of a *Resource has Lifecycle State* rule. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`.
+- **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members cannot be deleted. **Save** stores the rule, its definition and all grants together.
+
+Only superusers can see the plugin or call its API (`api/abac/...`). An inactive rule grants nothing.
 
 ## How inclusion rules work
 

@@ -59,7 +59,7 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
 
         grants = (
             InclusionRuleGroupPermission.objects.filter(
-                group__in=self.get_groups(user_or_group)
+                group__in=self.get_groups(user_or_group), rule__active=True
             )
             .select_related("rule")
             .prefetch_related("permissions")
@@ -82,6 +82,7 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
 
         app_label, _, codename = permission.rpartition(".")
         grant_filter = Q(
+            active=True,
             group_permissions__group__in=self.get_groups(user),
             group_permissions__permissions__codename=codename,
         )

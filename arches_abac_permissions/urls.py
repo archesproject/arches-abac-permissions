@@ -16,6 +16,7 @@ handler500 = "arches.app.views.main.custom_500"
 urlpatterns.append(path("", include("arches.extensions.querysets.urls")))
 urlpatterns.append(path("", include("arches.extensions.vue_components.urls")))
 urlpatterns.append(path("", include("arches.extensions.controlled_lists.urls")))
+urlpatterns.append(path("", include("arches_abac_permissions.api_urls")))
 urlpatterns.append(path("", include("arches.urls")))
 
 # Adds URL pattern to serve media files during development
