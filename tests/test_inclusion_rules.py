@@ -273,6 +273,17 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
             self.framework.get_perms(self.user, self.matching),
         )
 
+    def test_inactive_rules_grant_nothing(self):
+        InclusionRule.objects.update(active=False)
+        self.assertNotIn(
+            "view_resourceinstance", self.framework.get_perms(self.user, self.matching)
+        )
+        self.assertFalse(
+            self.framework.get_abac_resources(
+                self.user, "models.view_resourceinstance"
+            ).exists()
+        )
+
     def test_has_group_perm(self):
         self.assertTrue(
             self.framework.has_group_perm(

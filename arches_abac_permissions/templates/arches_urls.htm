@@ -1,0 +1,13 @@
+{% extends "arches_urls.htm" %}
+
+{% block arches_urls %}
+{{ block.super }}
+<div class="arches-urls"
+    abac_rules="{% url 'abac_rules' %}"
+    abac_rule='(ruleid) => {return "{% url "abac_rule" "aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa" %}".replace("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa", ruleid)}'
+    abac_rule_types="{% url 'abac_rule_types' %}"
+    abac_resource_models="{% url 'abac_resource_models' %}"
+    abac_groups="{% url 'abac_groups' %}"
+    abac_group='(groupid) => {return "{% url "abac_group" 0 %}".replace(/0$/, groupid)}'
+></div>
+{% endblock arches_urls %}
