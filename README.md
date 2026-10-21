@@ -114,6 +114,7 @@ Things to be aware of:
 | `modulename` | `classname` | Matches |
 |---|---|---|
 | `lifecycle_state_rule.py` | `LifecycleStateRule` | Resources of a graph that are in a given lifecycle state |
+| `resource_set_rule.py` | `ResourceSetRule` | The members of an [arches-resource-sets](https://github.com/archesproject/arches-resource-sets) resource set |
 | `search_rule.py` | `SearchRule` | Not yet evaluated; stores a saved search query |
 | `queryset_rule.py` | `QuerySetRule` | Not yet evaluated |
 
@@ -204,6 +205,28 @@ If the rule has no effect, check that:
 - the user has the `read_nodegroup` permission;
 - `RULE_LOCATIONS` is defined in your settings. If it's missing, loading the rule fails with `AttributeError: 'Settings' object has no attribute 'RULE_LOCATIONS'`;
 - the logs don't show `Inclusion rule ... could not be evaluated`. A rule that can't be evaluated, for example because its graph was deleted, is treated as matching nothing, so it grants nothing but doesn't break other permissions.
+
+## Creating a resource set rule
+
+A resource set rule grants permissions on every member of a resource set from [arches-resource-sets](https://github.com/archesproject/arches-resource-sets). Membership is read when permissions are checked, so adding a resource to the set or removing it takes effect straight away, with no change to the rule.
+
+It needs the optional dependency, and `arches_resource_sets` in `INSTALLED_APPS`:
+
+```bash
+pip install "arches-abac-permissions[arches-resource-sets]"
+```
+
+Create the rule in the admin as for a lifecycle state rule, with modulename `resource_set_rule.py`, classname `ResourceSetRule` and definition:
+
+```json
+{
+    "resource_set_id": "<id of the resource set>"
+}
+```
+
+Things to be aware of:
+
+- **Deleting the set, or the user who owns it, removes the access silently.** The rule then matches nothing, and nothing is logged.
 
 ## Adding custom rules to your project
 
