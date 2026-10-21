@@ -52,6 +52,15 @@ function generateConfig(): Promise<UserConfig> {
             alias[`@/${archesApplicationName}`] = path.join(archesApplicationPath, 'src', archesApplicationName);
         }
 
+        for (
+            const [applicationName, applicationPath]
+            of Object.entries(
+                (parsedData['RESOLVABLE_APPLICATION_PATHS'] ?? {}) as { [key: string]: string }
+            )
+        ) {
+            alias[`@/${applicationName}`] ??= path.join(applicationPath, 'src', applicationName);
+        }
+
         resolve({
             plugins: [
                 vue(),
