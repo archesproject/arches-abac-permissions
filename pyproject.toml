@@ -25,7 +25,7 @@ requires-python = ">=3.12"
 dependencies = [
     "arches>=8.2.0a9,<8.3.0",
 ]
-version = "0.0.1"
+version = "0.1.0a0"
 
 [dependency-groups]
 dev = [
