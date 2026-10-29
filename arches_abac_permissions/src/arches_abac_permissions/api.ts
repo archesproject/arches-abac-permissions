@@ -4,6 +4,7 @@ import Cookies from "js-cookie";
 import type {
     Group,
     ResourceModel,
+    ResourceSet,
     Rule,
     RuleTypeInfo,
 } from "@/arches_abac_permissions/types";
@@ -70,6 +71,13 @@ export const fetchResourceModels = async () =>
             arches.urls.abac_resource_models,
         )
     ).resource_models;
+
+export const fetchResourceSets = async () =>
+    (
+        await request<{ resource_sets: ResourceSet[] }>(
+            arches.urls.abac_resource_sets,
+        )
+    ).resource_sets;
 
 export const fetchGroups = async () =>
     (await request<{ groups: Group[] }>(arches.urls.abac_groups)).groups;

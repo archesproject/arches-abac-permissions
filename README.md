@@ -112,7 +112,7 @@ pip install -e arches-abac-permissions --group dev
 Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
 
 - **Rules** (left): filter, add, and delete rules.
-- **Rule Configuration** (middle): name, description, resource model and lifecycle state of a *Resource has Lifecycle State* rule. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`.
+- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*, or a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed). *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`.
 - **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members cannot be deleted. **Save** stores the rule, its definition and all grants together.
 
 Only superusers can see the plugin or call its API (`api/abac/...`). An inactive rule grants nothing.

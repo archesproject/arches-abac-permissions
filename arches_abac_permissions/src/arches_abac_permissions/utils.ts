@@ -1,4 +1,7 @@
-import { PERMISSION_NAMES } from "@/arches_abac_permissions/constants.ts";
+import {
+    PERMISSION_NAMES,
+    RESOURCE_SET,
+} from "@/arches_abac_permissions/constants.ts";
 
 import type {
     Group,
@@ -135,6 +138,9 @@ export function ruleMatchesFilter(
 export function isDraftComplete(draft: RuleDraft): boolean {
     if (!draft.name.trim()) {
         return false;
+    }
+    if (draft.rule_type === RESOURCE_SET) {
+        return Boolean(draft.definition.resource_set_id);
     }
     return Boolean(
         draft.definition.graphid && draft.definition.lifecycle_state_id,

@@ -5,6 +5,19 @@ export interface LifecycleStateDefinition {
     lifecycle_state_id: string;
 }
 
+export interface ResourceSetDefinition {
+    resource_set_id: string;
+}
+
+export type RuleDefinition = Partial<
+    LifecycleStateDefinition & ResourceSetDefinition
+>;
+
+export interface ResourceSet {
+    id: string;
+    name: string;
+}
+
 export interface RuleTypeInfo {
     key: string;
     label: string;
@@ -23,7 +36,7 @@ export interface Rule {
     description: string;
     active: boolean;
     rule_type: string | null;
-    definition: Partial<LifecycleStateDefinition>;
+    definition: RuleDefinition;
     group_permissions: GroupPermission[];
 }
 
@@ -51,6 +64,6 @@ export interface RuleDraft {
     name: string;
     description: string;
     active: boolean;
-    definition: Partial<LifecycleStateDefinition>;
+    definition: RuleDefinition;
     grants: Record<number, PermissionName[]>;
 }

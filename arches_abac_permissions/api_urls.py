@@ -4,6 +4,7 @@ from arches_abac_permissions.views import (
     GroupsView,
     GroupView,
     ResourceModelsView,
+    ResourceSetsView,
     RulesView,
     RuleTypesView,
     RuleView,
@@ -17,6 +18,9 @@ urlpatterns = [
         "api/abac/resource_models",
         ResourceModelsView.as_view(),
         name="abac_resource_models",
+    ),
+    path(
+        "api/abac/resource_sets", ResourceSetsView.as_view(), name="abac_resource_sets"
     ),
     path("api/abac/groups", GroupsView.as_view(), name="abac_groups"),
     path("api/abac/groups/<int:group_id>", GroupView.as_view(), name="abac_group"),

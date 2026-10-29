@@ -14,6 +14,7 @@ import {
     deleteRule,
     fetchGroups,
     fetchResourceModels,
+    fetchResourceSets,
     fetchRuleTypes,
     fetchRules,
     updateRule,
@@ -39,6 +40,7 @@ import {
 import type {
     Group,
     ResourceModel,
+    ResourceSet,
     Rule,
     RuleDraft,
     RuleTypeInfo,
@@ -52,6 +54,7 @@ const rules = ref<Rule[]>([]);
 const groups = ref<Group[]>([]);
 const ruleTypes = ref<RuleTypeInfo[]>([]);
 const resourceModels = ref<ResourceModel[]>([]);
+const resourceSets = ref<ResourceSet[]>([]);
 const isLoading = ref(true);
 const isSaving = ref(false);
 const showAddGroup = ref(false);
@@ -241,17 +244,24 @@ function warnBeforeUnload(event: BeforeUnloadEvent) {
 onMounted(async () => {
     window.addEventListener("beforeunload", warnBeforeUnload);
     try {
-        const [loadedRules, loadedGroups, loadedTypes, loadedModels] =
-            await Promise.all([
-                fetchRules(),
-                fetchGroups(),
-                fetchRuleTypes(),
-                fetchResourceModels(),
-            ]);
+        const [
+            loadedRules,
+            loadedGroups,
+            loadedTypes,
+            loadedModels,
+            loadedSets,
+        ] = await Promise.all([
+            fetchRules(),
+            fetchGroups(),
+            fetchRuleTypes(),
+            fetchResourceModels(),
+            fetchResourceSets(),
+        ]);
         rules.value = sortRules(loadedRules);
         groups.value = sortGroups(loadedGroups);
         ruleTypes.value = loadedTypes;
         resourceModels.value = loadedModels;
+        resourceSets.value = loadedSets;
     } catch (error) {
         showError($gettext("Unable to load rule permissions"), error);
     } finally {
@@ -291,6 +301,7 @@ onBeforeUnmount(() => {
                 v-model="draft"
                 :rule-types="ruleTypes"
                 :resource-models="resourceModels"
+                :resource-sets="resourceSets"
                 @pick="pickRuleType"
             />
             <GroupPermissions

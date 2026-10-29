@@ -88,3 +88,13 @@ describe("ruleMatchesFilter", () => {
         expect(ruleMatchesFilter(rule, "  ", "Type", [])).toBe(true);
     });
 });
+
+describe("isDraftComplete for resource set rules", () => {
+    it("requires a resource set id", () => {
+        const draft = newDraft("resource_set");
+        draft.name = "Set rule";
+        expect(isDraftComplete(draft)).toBe(false);
+        draft.definition = { resource_set_id: "s" };
+        expect(isDraftComplete(draft)).toBe(true);
+    });
+});

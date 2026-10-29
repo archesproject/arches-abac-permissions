@@ -1,5 +1,6 @@
 from dataclasses import dataclass
 
+from django.apps import apps
 from django.utils.translation import gettext_lazy as _
 
 
@@ -12,6 +13,11 @@ class RuleType:
     description: str
     icon: str
     definition_keys: tuple[str, ...]
+    required_app: str | None = None
+
+    @property
+    def available(self):
+        return self.required_app is None or apps.is_installed(self.required_app)
 
 
 # Types the rule-permissions UI can create and edit. Clients send only the
@@ -27,6 +33,16 @@ RULE_TYPES = {
         ),
         icon="pi pi-sync",
         definition_keys=("graphid", "lifecycle_state_id"),
+    ),
+    "resource_set": RuleType(
+        key="resource_set",
+        modulename="resource_set_rule.py",
+        classname="ResourceSetRule",
+        label=_("Resource is in Resource Set"),
+        description=_("Matches the members of a resource set"),
+        icon="pi pi-th-large",
+        definition_keys=("resource_set_id",),
+        required_app="arches_resource_sets",
     ),
 }
 

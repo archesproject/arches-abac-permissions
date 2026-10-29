@@ -1,6 +1,7 @@
 import json
 from http import HTTPStatus
 
+from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
@@ -98,7 +99,7 @@ def parse_rule_payload(body):
         raise BadRequest(_("'active' must be true or false."))
 
     rule_type = RULE_TYPES.get(body.get("rule_type"))
-    if rule_type is None:
+    if rule_type is None or not rule_type.available:
         raise BadRequest(_("Unknown rule type."))
 
     raw_definition = body.get("definition")
@@ -109,11 +110,13 @@ def parse_rule_payload(body):
         for key in rule_type.definition_keys
         if raw_definition.get(key) is not None
     }
-    rule_class = InclusionRule(
-        modulename=rule_type.modulename, classname=rule_type.classname
-    ).get_class_module()
+    rule = InclusionRule(
+        modulename=rule_type.modulename,
+        classname=rule_type.classname,
+        definition=definition,
+    )
     try:
-        rule_class.parse_definition(definition)
+        rule.get_class_module().validate_definition(rule)
     except ValidationError as e:
         raise BadRequest(" ".join(e.messages))
 
@@ -231,6 +234,7 @@ class RuleTypesView(SuperuserAPIView):
                         "icon": rule_type.icon,
                     }
                     for rule_type in RULE_TYPES.values()
+                    if rule_type.available
                 ]
             }
         )
@@ -264,6 +268,20 @@ class ResourceModelsView(SuperuserAPIView):
             )
         resource_models.sort(key=lambda model: model["name"].lower())
         return JSONResponse({"resource_models": resource_models})
+
+
+class ResourceSetsView(SuperuserAPIView):
+    def get(self, request):
+        if not apps.is_installed("arches_resource_sets"):
+            return JSONResponse({"resource_sets": []})
+        from arches_resource_sets.models import ResourceSet
+
+        resource_sets = [
+            {"id": str(resource_set.pk), "name": str(resource_set.description or "")}
+            for resource_set in ResourceSet.objects.all()
+        ]
+        resource_sets.sort(key=lambda resource_set: resource_set["name"].lower())
+        return JSONResponse({"resource_sets": resource_sets})
 
 
 def serialize_group(group):

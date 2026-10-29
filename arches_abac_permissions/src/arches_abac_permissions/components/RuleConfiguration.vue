@@ -7,10 +7,15 @@ import Textarea from "openvue/textarea";
 
 import RuleTypePicker from "@/arches_abac_permissions/components/RuleTypePicker.vue";
 import LifecycleStateRuleForm from "@/arches_abac_permissions/components/rule_types/LifecycleStateRuleForm.vue";
-import { LIFECYCLE_STATE } from "@/arches_abac_permissions/constants.ts";
+import ResourceSetRuleForm from "@/arches_abac_permissions/components/rule_types/ResourceSetRuleForm.vue";
+import {
+    LIFECYCLE_STATE,
+    RESOURCE_SET,
+} from "@/arches_abac_permissions/constants.ts";
 
 import type {
     ResourceModel,
+    ResourceSet,
     RuleDraft,
     RuleTypeInfo,
 } from "@/arches_abac_permissions/types";
@@ -20,12 +25,16 @@ const { $gettext } = useGettext();
 const props = defineProps<{
     ruleTypes: RuleTypeInfo[];
     resourceModels: ResourceModel[];
+    resourceSets: ResourceSet[];
 }>();
 const draft = defineModel<RuleDraft | null>({ required: true });
 const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 
 // Add new rule types here with a form component taking v-model="definition".
-const RULE_TYPE_FORMS = { [LIFECYCLE_STATE]: LifecycleStateRuleForm };
+const RULE_TYPE_FORMS = {
+    [LIFECYCLE_STATE]: LifecycleStateRuleForm,
+    [RESOURCE_SET]: ResourceSetRuleForm,
+};
 
 const ruleType = computed(() =>
     props.ruleTypes.find((type) => type.key === draft.value?.rule_type),
@@ -35,6 +44,11 @@ const form = computed(
         RULE_TYPE_FORMS[
             (draft.value?.rule_type ?? "") as keyof typeof RULE_TYPE_FORMS
         ],
+);
+const formProps = computed(() =>
+    draft.value?.rule_type === RESOURCE_SET
+        ? { resourceSets: props.resourceSets }
+        : { resourceModels: props.resourceModels },
 );
 const heading = computed(() => {
     if (!draft.value) {
@@ -101,7 +115,7 @@ const heading = computed(() => {
                     :is="form"
                     v-if="form"
                     v-model="draft.definition"
-                    :resource-models="resourceModels"
+                    v-bind="formProps"
                 />
             </form>
         </div>

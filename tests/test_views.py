@@ -1,5 +1,9 @@
 import json
+import uuid
+from unittest import skipIf
 
+from django.apps import apps
+from django.contrib.auth.models import Group, Permission, User
 from django.contrib.auth.models import Group, Permission, User
 from django.test import TestCase
 from django.urls import reverse
@@ -174,7 +178,28 @@ class RuleApiTests(ApiTestCase):
 class ReferenceDataApiTests(ApiTestCase):
     def test_rule_types(self):
         types = self.client.get(reverse("abac_rule_types")).json()["rule_types"]
-        self.assertEqual([t["key"] for t in types], ["lifecycle_state"])
+        expected = ["lifecycle_state"]
+        if apps.is_installed("arches_resource_sets"):
+            expected.append("resource_set")
+        self.assertEqual([t["key"] for t in types], expected)
+
+    def test_resource_sets(self):
+        response = self.client.get(reverse("abac_resource_sets"))
+        self.assertEqual(response.status_code, 200)
+        if not apps.is_installed("arches_resource_sets"):
+            self.assertEqual(response.json()["resource_sets"], [])
+
+    @skipIf(apps.is_installed("arches_resource_sets"), "resource sets installed")
+    def test_resource_set_rule_unavailable_without_app(self):
+        response = self.send(
+            "post",
+            reverse("abac_rules"),
+            self.payload(
+                rule_type="resource_set",
+                definition={"resource_set_id": str(uuid.uuid4())},
+            ),
+        )
+        self.assertEqual(response.status_code, 400)
 
     def test_resource_models(self):
         models = self.client.get(reverse("abac_resource_models")).json()[
