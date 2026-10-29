@@ -148,7 +148,7 @@ Sign in as a superuser, go to `/admin/`, and under **Arches_Abac_Permissions** c
 
 | Field | Example value | Notes |
 |---|---|---|
-| Owner | *(leave blank)* | Optional. The user responsible for the rule. |
+| Owner | `select user` | The user responsible for the rule. |
 | Name | `Active Person resources` | Any descriptive name. |
 | Modulename | `lifecycle_state_rule.py` | Must be exactly this value. |
 | Classname | `LifecycleStateRule` | Must be exactly this value. |
