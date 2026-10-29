@@ -31,7 +31,7 @@ class Migration(migrations.Migration):
 
     dependencies = [
         ("models", "10999_update_principaluser"),
-        ("arches_abac_permissions", "0002_lifecyclestaterule"),
+        ("arches_abac_permissions", "0003_resourcesetrule"),
     ]
 
     operations = [
