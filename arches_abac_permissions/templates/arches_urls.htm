@@ -10,5 +10,7 @@
     abac_resource_sets="{% url 'abac_resource_sets' %}"
     abac_groups="{% url 'abac_groups' %}"
     abac_group='(groupid) => {return "{% url "abac_group" 0 %}".replace(/0$/, groupid)}'
+    abac_users="{% url 'abac_users' %}"
+    abac_user_group_membership="{% url 'abac_user_group_membership' %}"
 ></div>
 {% endblock arches_urls %}

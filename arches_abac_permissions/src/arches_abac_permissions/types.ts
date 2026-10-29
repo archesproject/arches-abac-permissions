@@ -67,3 +67,16 @@ export interface RuleDraft {
     definition: RuleDefinition;
     grants: Record<number, PermissionName[]>;
 }
+
+export interface Account {
+    id: number;
+    username: string;
+    first_name: string;
+    last_name: string;
+    email: string;
+    is_active: boolean;
+    is_superuser: boolean;
+    last_login: string | null;
+    date_joined: string;
+    groups: number[];
+}

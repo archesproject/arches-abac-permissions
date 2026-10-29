@@ -43,13 +43,38 @@ function permissionLabel(permission: PermissionName) {
     }[permission];
 }
 
-function toggleAll(permission: PermissionName, granted: boolean) {
+function allGranted(permission: PermissionName) {
+    const current = draft.value;
+    return (
+        !!current &&
+        props.groups.length > 0 &&
+        props.groups.every((group) =>
+            hasPermission(current, group.id, permission),
+        )
+    );
+}
+
+function toggleAll(permission: PermissionName) {
     if (draft.value) {
         setPermissionForAllGroups(
             draft.value,
             props.groups,
             permission,
-            granted,
+            !allGranted(permission),
+        );
+    }
+}
+
+function hasAny(groupId: number) {
+    return (draft.value?.grants[groupId] ?? []).length > 0;
+}
+
+function toggleGroup(groupId: number) {
+    if (draft.value) {
+        setGroupPermissions(
+            draft.value,
+            groupId,
+            hasAny(groupId) ? [] : PERMISSION_NAMES,
         );
     }
 }
@@ -68,17 +93,10 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                 ></i>
                 {{ $gettext("Assign Group Permissions to Rule") }}
             </h2>
-        </header>
-        <p
-            v-if="!draft"
-            class="empty"
-        >
-            {{
-                $gettext("Select or create a rule to assign group permissions.")
-            }}
-        </p>
-        <template v-else>
-            <div class="toolbar">
+            <span
+                v-if="draft"
+                class="toolbar-actions"
+            >
                 <label
                     class="active-toggle"
                     for="abac-rule-active"
@@ -91,23 +109,30 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                         draft.active ? $gettext("Active") : $gettext("Inactive")
                     }}
                 </label>
-                <span class="toolbar-actions">
-                    <Button
-                        size="small"
-                        severity="secondary"
-                        :label="$gettext('Cancel')"
-                        :disabled="isSaving"
-                        @click="emit('cancel')"
-                    />
-                    <Button
-                        size="small"
-                        :label="$gettext('Save')"
-                        :disabled="!canSave || !isDirty"
-                        :loading="isSaving"
-                        @click="emit('save')"
-                    />
-                </span>
-            </div>
+                <Button
+                    severity="secondary"
+                    variant="outlined"
+                    :label="$gettext('Cancel')"
+                    :disabled="isSaving"
+                    @click="emit('cancel')"
+                />
+                <Button
+                    :label="$gettext('Save')"
+                    :disabled="!canSave || !isDirty"
+                    :loading="isSaving"
+                    @click="emit('save')"
+                />
+            </span>
+        </header>
+        <p
+            v-if="!draft"
+            class="empty"
+        >
+            {{
+                $gettext("Select or create a rule to assign group permissions.")
+            }}
+        </p>
+        <template v-else>
             <div class="table-wrapper">
                 <table class="grants">
                     <caption class="sr-only">
@@ -119,60 +144,66 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                     </caption>
                     <thead>
                         <tr>
-                            <th scope="col">{{ $gettext("Group") }}</th>
+                            <th
+                                scope="col"
+                                class="name-cell"
+                            >
+                                {{ $gettext("Group") }}
+                            </th>
                             <th
                                 v-for="permission in PERMISSION_NAMES"
                                 :key="permission"
                                 scope="col"
+                                class="check-cell"
                             >
-                                <div class="permission-heading">
-                                    {{ permissionLabel(permission) }}
-                                    <span class="bulk-actions">
-                                        <button
-                                            type="button"
-                                            class="link-button"
-                                            :aria-label="
-                                                $gettext(
-                                                    'Grant %{ permission } to all groups',
-                                                    {
-                                                        permission:
-                                                            permissionLabel(
-                                                                permission,
-                                                            ),
-                                                    },
-                                                )
-                                            "
-                                            @click="toggleAll(permission, true)"
-                                        >
-                                            {{ $gettext("Grant all") }}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="link-button"
-                                            :aria-label="
-                                                $gettext(
-                                                    'Revoke %{ permission } from all groups',
-                                                    {
-                                                        permission:
-                                                            permissionLabel(
-                                                                permission,
-                                                            ),
-                                                    },
-                                                )
-                                            "
-                                            @click="
-                                                toggleAll(permission, false)
-                                            "
-                                        >
-                                            {{ $gettext("Revoke all") }}
-                                        </button>
-                                    </span>
-                                </div>
+                                <button
+                                    type="button"
+                                    class="grant-button"
+                                    :aria-label="
+                                        allGranted(permission)
+                                            ? $gettext(
+                                                  'Revoke %{permission} from all groups',
+                                                  {
+                                                      permission:
+                                                          permissionLabel(
+                                                              permission,
+                                                          ),
+                                                  },
+                                              )
+                                            : $gettext(
+                                                  'Grant %{permission} to all groups',
+                                                  {
+                                                      permission:
+                                                          permissionLabel(
+                                                              permission,
+                                                          ),
+                                                  },
+                                              )
+                                    "
+                                    :disabled="groups.length === 0"
+                                    @click="toggleAll(permission)"
+                                >
+                                    <span>{{
+                                        allGranted(permission)
+                                            ? $gettext("Revoke")
+                                            : $gettext("Grant")
+                                    }}</span>
+                                    <span>{{
+                                        permissionLabel(permission)
+                                    }}</span>
+                                </button>
                             </th>
-                            <th scope="col">
-                                <span class="sr-only">{{
-                                    $gettext("Actions")
-                                }}</span>
+                            <th
+                                scope="col"
+                                class="action-cell"
+                            >
+                                <Button
+                                    size="small"
+                                    icon="pi pi-plus"
+                                    class="add-group"
+                                    :label="$gettext('Add Group')"
+                                    @click="emit('add-group')"
+                                />
                             </th>
                         </tr>
                     </thead>
@@ -181,54 +212,42 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                             v-for="group in groups"
                             :key="group.id"
                         >
-                            <th scope="row">
-                                <div class="group-name">
-                                    <span>{{ group.name }}</span>
-                                    <span class="bulk-actions">
-                                        <button
-                                            type="button"
-                                            class="link-button"
-                                            :aria-label="
-                                                $gettext(
-                                                    'Select all permissions for %{ group }',
-                                                    { group: group.name },
-                                                )
-                                            "
-                                            @click="
-                                                setGroupPermissions(
-                                                    draft,
-                                                    group.id,
-                                                    PERMISSION_NAMES,
-                                                )
-                                            "
-                                        >
-                                            {{ $gettext("Select all") }}
-                                        </button>
-                                        <button
-                                            type="button"
-                                            class="link-button"
-                                            :aria-label="
-                                                $gettext(
-                                                    'Clear permissions for %{ group }',
-                                                    { group: group.name },
-                                                )
-                                            "
-                                            @click="
-                                                setGroupPermissions(
-                                                    draft,
-                                                    group.id,
-                                                    [],
-                                                )
-                                            "
-                                        >
-                                            {{ $gettext("Clear") }}
-                                        </button>
-                                    </span>
-                                </div>
+                            <th
+                                scope="row"
+                                class="name-cell"
+                            >
+                                <span class="group-name">
+                                    <span class="group-label">{{
+                                        group.name
+                                    }}</span>
+                                    <button
+                                        type="button"
+                                        class="link-button"
+                                        :aria-label="
+                                            hasAny(group.id)
+                                                ? $gettext(
+                                                      'Clear permissions for %{group}',
+                                                      { group: group.name },
+                                                  )
+                                                : $gettext(
+                                                      'Select all permissions for %{group}',
+                                                      { group: group.name },
+                                                  )
+                                        "
+                                        @click="toggleGroup(group.id)"
+                                    >
+                                        {{
+                                            hasAny(group.id)
+                                                ? $gettext("Clear selection")
+                                                : $gettext("Select all")
+                                        }}
+                                    </button>
+                                </span>
                             </th>
                             <td
                                 v-for="permission in PERMISSION_NAMES"
                                 :key="permission"
+                                class="check-cell"
                             >
                                 <Checkbox
                                     binary
@@ -240,14 +259,11 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                                         )
                                     "
                                     :aria-label="
-                                        $gettext(
-                                            '%{ permission } for %{ group }',
-                                            {
-                                                permission:
-                                                    permissionLabel(permission),
-                                                group: group.name,
-                                            },
-                                        )
+                                        $gettext('%{permission} for %{group}', {
+                                            permission:
+                                                permissionLabel(permission),
+                                            group: group.name,
+                                        })
                                     "
                                     @update:model-value="
                                         setPermission(
@@ -259,19 +275,23 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                                     "
                                 />
                             </td>
-                            <td>
-                                <Button
-                                    icon="pi pi-trash"
-                                    severity="danger"
-                                    variant="text"
-                                    size="small"
+                            <td class="action-cell">
+                                <button
+                                    type="button"
+                                    class="row-delete"
+                                    :title="$gettext('Delete group')"
                                     :aria-label="
-                                        $gettext('Delete group %{ group }', {
+                                        $gettext('Delete group %{group}', {
                                             group: group.name,
                                         })
                                     "
                                     @click="emit('delete-group', group)"
-                                />
+                                >
+                                    <i
+                                        class="pi pi-trash"
+                                        aria-hidden="true"
+                                    ></i>
+                                </button>
                             </td>
                         </tr>
                     </tbody>
@@ -283,15 +303,6 @@ function toggleAll(permission: PermissionName, granted: boolean) {
                     {{ $gettext("There are no groups yet.") }}
                 </p>
             </div>
-            <div class="toolbar footer">
-                <Button
-                    size="small"
-                    variant="outlined"
-                    icon="pi pi-plus"
-                    :label="$gettext('Add Group')"
-                    @click="emit('add-group')"
-                />
-            </div>
         </template>
     </section>
 </template>
@@ -301,76 +312,138 @@ function toggleAll(permission: PermissionName, granted: boolean) {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    font-weight: 600;
+    margin-right: 0.4rem;
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--abac-text-primary);
 }
 
 .toolbar-actions {
     margin-left: auto;
     display: flex;
-    gap: 0.5rem;
-}
-
-.footer {
-    border-top: 1px solid var(--p-content-border-color);
-    border-bottom: none;
+    align-items: center;
+    gap: 0.4rem;
 }
 
 .table-wrapper {
     flex: 1;
     overflow: auto;
+    padding: 0 0.5rem;
 }
 
 .grants {
     width: 100%;
     border-collapse: collapse;
+    font-size: 1.25rem;
 }
 
 .grants th,
 .grants td {
-    padding: 0.6rem 0.75rem;
-    border-bottom: 1px solid var(--p-content-border-color);
+    padding: 0.7rem 0;
+    border-bottom: 1px solid var(--abac-border);
     text-align: center;
     vertical-align: middle;
 }
 
-.grants th:first-child {
+.grants thead th {
+    position: sticky;
+    top: 0;
+    z-index: 1;
+    background: var(--abac-surface-bg);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--abac-text-secondary);
+}
+
+.grants tbody tr {
+    background: var(--abac-surface-card);
+    color: var(--abac-text-primary);
+}
+
+.grants tbody tr:hover {
+    background: var(--abac-row-hover);
+}
+
+.grants .name-cell {
+    padding-left: 1.2rem;
     text-align: left;
 }
 
-.group-name {
-    font-weight: 600;
-    display: flex;
-    flex-direction: column;
-    gap: 0.2rem;
-}
-
-.permission-heading {
-    display: flex;
-    flex-direction: column;
-    align-items: center;
-    gap: 0.2rem;
-}
-
-.bulk-actions {
-    display: flex;
-    gap: 0.5rem;
+.grants tbody .name-cell {
     font-weight: 400;
 }
 
-.link-button {
-    border: none;
-    background: none;
-    padding: 0;
-    color: var(--p-primary-color);
-    font: inherit;
-    font-size: 1.1rem;
-    cursor: pointer;
-    text-decoration: underline;
+.check-cell {
+    width: 7.6rem;
 }
 
-.link-button:focus-visible {
-    outline: 2px solid var(--p-primary-color);
+.action-cell {
+    width: 9rem;
+    padding-right: 1.2rem;
+}
+
+.grants tbody .action-cell {
+    text-align: right;
+}
+
+.group-name {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-width: 0;
+}
+
+.group-label {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.grant-button {
+    margin: 0 auto;
+    padding: 0;
+    border: none;
+    background: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    color: var(--abac-accent);
+    font: inherit;
+    font-size: 1.2rem;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.grant-button:hover {
+    color: var(--abac-brand-light);
+}
+
+.grant-button:disabled {
+    color: var(--abac-text-secondary);
+    cursor: default;
+    text-decoration: none;
+}
+
+.grant-button:focus-visible {
+    outline: 2px solid var(--abac-accent);
     outline-offset: 2px;
+}
+
+.grants :deep(.add-group.p-button) {
+    padding: 0.4rem 0.8rem;
+    font-size: 1.2rem;
+    font-weight: 500;
+    line-height: 1.6;
+    gap: 0.4rem;
+    border-radius: 0.4rem;
+    white-space: nowrap;
+}
+
+.grants :deep(.add-group .p-button-icon) {
+    font-size: 0.8rem;
 }
 
 .sr-only {

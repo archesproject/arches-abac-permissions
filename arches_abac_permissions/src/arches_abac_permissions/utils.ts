@@ -4,6 +4,7 @@ import {
 } from "@/arches_abac_permissions/constants.ts";
 
 import type {
+    Account,
     Group,
     PermissionName,
     Rule,
@@ -145,4 +146,40 @@ export function isDraftComplete(draft: RuleDraft): boolean {
     return Boolean(
         draft.definition.graphid && draft.definition.lifecycle_state_id,
     );
+}
+
+export function accountDisplayName(account: Account): string {
+    const name = `${account.first_name} ${account.last_name}`.trim();
+    return name || account.username;
+}
+
+export function accountMatchesFilter(
+    account: Account,
+    filter: string,
+    groupNames: string[],
+): boolean {
+    const query = filter.trim().toLowerCase();
+    if (!query) {
+        return true;
+    }
+    return [
+        account.username,
+        account.first_name,
+        account.last_name,
+        account.email,
+        ...groupNames,
+    ].some((value) => value.toLowerCase().includes(query));
+}
+
+// Groups held by some or all of `accounts`, with how many hold each.
+export function groupHoldings(
+    accounts: Account[],
+): { groupId: number; count: number }[] {
+    const counts = new Map<number, number>();
+    for (const account of accounts) {
+        for (const groupId of account.groups) {
+            counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
+        }
+    }
+    return [...counts].map(([groupId, count]) => ({ groupId, count }));
 }

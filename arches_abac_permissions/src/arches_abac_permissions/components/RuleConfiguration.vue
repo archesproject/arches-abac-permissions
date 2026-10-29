@@ -56,8 +56,8 @@ const heading = computed(() => {
     }
     const label = ruleType.value?.label ?? "";
     return draft.value.id
-        ? $gettext("Edit rule: %{ name }", { name: draft.value.name })
-        : $gettext("New rule: %{ label }", { label });
+        ? $gettext("Edit rule: %{name}", { name: draft.value.name })
+        : $gettext("New rule: %{label}", { label });
 });
 </script>
 
@@ -131,14 +131,14 @@ const heading = computed(() => {
 .rule-form {
     display: flex;
     flex-direction: column;
-    gap: 1.25rem;
-    padding: 1.5rem 2rem;
-    max-width: 70rem;
+    gap: 2rem;
+    padding: 2.4rem 2.8rem;
 }
 
 .form-heading {
     margin: 0;
     font-size: 1.8rem;
     font-weight: 500;
+    color: var(--abac-text-primary);
 }
 </style>

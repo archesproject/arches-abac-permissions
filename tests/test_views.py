@@ -4,7 +4,6 @@ from unittest import skipIf
 
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission, User
-from django.contrib.auth.models import Group, Permission, User
 from django.test import TestCase
 from django.urls import reverse
 
@@ -14,7 +13,7 @@ from tests.test_inclusion_rules import LifecycleTestCase, make_rule
 
 class ApiTestCase(LifecycleTestCase):
     def setUp(self):
-        self.superuser = User.objects.create_superuser("admin", password="pw")
+        self.superuser = User.objects.create_superuser("api_admin", password="pw")
         self.user = User.objects.create_user("plain", password="pw")
         self.group = Group.objects.create(name="Reviewers")
         self.client.force_login(self.superuser)
@@ -37,6 +36,8 @@ class ApiTestCase(LifecycleTestCase):
         return body
 
     def send(self, method, url, body=None):
+        if method == "get":
+            return self.client.get(url)
         return getattr(self.client, method)(
             url,
             data=json.dumps(body) if body is not None else None,
@@ -61,6 +62,8 @@ class AccessTests(ApiTestCase):
             reverse("abac_resource_models"),
             reverse("abac_groups"),
             reverse("abac_group", args=[self.group.pk]),
+            reverse("abac_users"),
+            reverse("abac_user_group_membership"),
         ]
 
     def test_non_superuser_forbidden(self):
@@ -238,3 +241,48 @@ class GroupApiTests(ApiTestCase):
         url = reverse("abac_group", args=[self.group.pk])
         self.assertEqual(self.send("delete", url).status_code, 409)
         self.assertTrue(Group.objects.filter(pk=self.group.pk).exists())
+
+
+class MembershipApiTests(ApiTestCase):
+    def test_list_users(self):
+        self.user.groups.add(self.group)
+        response = self.send("get", reverse("abac_users"))
+        self.assertEqual(response.status_code, 200)
+        users = {u["username"]: u for u in response.json()["users"]}
+        self.assertEqual(users["plain"]["groups"], [self.group.pk])
+        self.assertNotIn("password", users["plain"])
+
+    def test_bulk_add_and_remove(self):
+        other = Group.objects.create(name="Other")
+        self.user.groups.add(other)
+        url = reverse("abac_user_group_membership")
+        response = self.send(
+            "post",
+            url,
+            {
+                "user_ids": [self.user.pk, self.superuser.pk],
+                "add": [self.group.pk],
+                "remove": [other.pk],
+            },
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(
+            set(self.user.groups.values_list("pk", flat=True)), {self.group.pk}
+        )
+        self.assertEqual(
+            set(self.superuser.groups.values_list("pk", flat=True)), {self.group.pk}
+        )
+
+    def test_rejects_bad_input(self):
+        url = reverse("abac_user_group_membership")
+        good = {"user_ids": [self.user.pk], "add": [self.group.pk], "remove": []}
+        for change in (
+            {"user_ids": []},
+            {"user_ids": [999999]},
+            {"add": [999999]},
+            {"add": ["x"]},
+            {"remove": [self.group.pk]},
+        ):
+            response = self.send("post", url, {**good, **change})
+            self.assertEqual(response.status_code, 400, change)
+        self.assertEqual(self.user.groups.count(), 0)

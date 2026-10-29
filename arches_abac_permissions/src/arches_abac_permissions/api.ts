@@ -2,6 +2,7 @@ import arches from "arches";
 import Cookies from "js-cookie";
 
 import type {
+    Account,
     Group,
     ResourceModel,
     ResourceSet,
@@ -87,3 +88,19 @@ export const createGroup = (name: string) =>
 
 export const deleteGroup = (groupId: number) =>
     request<void>(arches.urls.abac_group(groupId), "DELETE");
+
+export const fetchAccounts = async () =>
+    (await request<{ users: Account[] }>(arches.urls.abac_users)).users;
+
+export const changeMembership = async (
+    userIds: number[],
+    add: number[],
+    remove: number[],
+) =>
+    (
+        await request<{ users: Account[] }>(
+            arches.urls.abac_user_group_membership,
+            "POST",
+            { user_ids: userIds, add, remove },
+        )
+    ).users;

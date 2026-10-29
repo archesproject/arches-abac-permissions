@@ -20,6 +20,7 @@ import {
     updateRule,
 } from "@/arches_abac_permissions/api.ts";
 import AddGroupDialog from "@/arches_abac_permissions/components/AddGroupDialog.vue";
+import GroupMembership from "@/arches_abac_permissions/components/GroupMembership.vue";
 import GroupPermissions from "@/arches_abac_permissions/components/GroupPermissions.vue";
 import RuleConfiguration from "@/arches_abac_permissions/components/RuleConfiguration.vue";
 import RuleList from "@/arches_abac_permissions/components/RuleList.vue";
@@ -58,6 +59,17 @@ const resourceSets = ref<ResourceSet[]>([]);
 const isLoading = ref(true);
 const isSaving = ref(false);
 const showAddGroup = ref(false);
+const mode = ref<"rule" | "membership">("rule");
+const modeOptions = computed<
+    { value: "rule" | "membership"; label: string; icon: string }[]
+>(() => [
+    { value: "rule", label: $gettext("By Rule"), icon: "pi pi-filter" },
+    {
+        value: "membership",
+        label: $gettext("Group Membership"),
+        icon: "pi pi-id-card",
+    },
+]);
 
 const draft = ref<RuleDraft | null>(null);
 const savedSnapshot = ref("");
@@ -172,7 +184,7 @@ async function save() {
 function requestDeleteRule(rule: Rule) {
     confirmDestructive(
         $gettext(
-            "Delete the rule “%{ name }”? This also removes its group permissions.",
+            "Delete the rule “%{name}”? This also removes its group permissions.",
             {
                 name: rule.name,
             },
@@ -199,7 +211,7 @@ function requestDeleteRule(rule: Rule) {
 function requestDeleteGroup(group: Group) {
     confirmDestructive(
         $gettext(
-            "Delete the group “%{ name }”? Its permissions on every rule will also be removed.",
+            "Delete the group “%{name}”? Its permissions on every rule will also be removed.",
             { name: group.name },
         ),
         $gettext("Confirm deletion"),
@@ -284,38 +296,76 @@ onBeforeUnmount(() => {
         >
             <ProgressSpinner :aria-label="$gettext('Loading')" />
         </div>
-        <div
-            v-else
-            class="columns"
-        >
-            <RuleList
-                :rules="rules"
+        <template v-else>
+            <div class="mode-bar">
+                <span
+                    id="abac-mode-label"
+                    class="mode-title"
+                    >{{ $gettext("Set permissions by") }}</span
+                >
+                <div
+                    class="mode-toggle"
+                    role="group"
+                    aria-labelledby="abac-mode-label"
+                >
+                    <button
+                        v-for="option in modeOptions"
+                        :key="option.value"
+                        type="button"
+                        class="mode-option"
+                        :class="{ active: mode === option.value }"
+                        :aria-pressed="mode === option.value"
+                        @click="mode = option.value"
+                    >
+                        <i
+                            :class="option.icon"
+                            aria-hidden="true"
+                        ></i>
+                        {{ option.label }}
+                    </button>
+                </div>
+            </div>
+            <GroupMembership
+                v-show="mode === 'membership'"
                 :groups="groups"
-                :rule-types="ruleTypes"
-                :selected-id="draft?.id ?? null"
-                @select="selectRule"
-                @add="startNewRule"
-                @delete="requestDeleteRule"
-            />
-            <RuleConfiguration
-                v-model="draft"
-                :rule-types="ruleTypes"
-                :resource-models="resourceModels"
-                :resource-sets="resourceSets"
-                @pick="pickRuleType"
-            />
-            <GroupPermissions
-                v-model="draft"
-                :groups="groups"
-                :can-save="canSave"
-                :is-dirty="isDirty"
-                :is-saving="isSaving"
-                @save="save"
-                @cancel="cancel"
                 @add-group="showAddGroup = true"
                 @delete-group="requestDeleteGroup"
             />
-        </div>
+            <div
+                v-show="mode === 'rule'"
+                class="columns"
+                :class="{ 'two-columns': !draft }"
+            >
+                <RuleList
+                    :rules="rules"
+                    :groups="groups"
+                    :rule-types="ruleTypes"
+                    :selected-id="draft?.id ?? null"
+                    @select="selectRule"
+                    @add="startNewRule"
+                    @delete="requestDeleteRule"
+                />
+                <RuleConfiguration
+                    v-model="draft"
+                    :rule-types="ruleTypes"
+                    :resource-models="resourceModels"
+                    :resource-sets="resourceSets"
+                    @pick="pickRuleType"
+                />
+                <GroupPermissions
+                    v-if="draft"
+                    v-model="draft"
+                    :groups="groups"
+                    :can-save="canSave"
+                    :is-dirty="isDirty"
+                    :is-saving="isSaving"
+                    @save="save"
+                    @cancel="cancel"
+                    @add-group="showAddGroup = true"
+                    @delete-group="requestDeleteGroup"
+                />
+            </div>
+        </template>
         <AddGroupDialog
             v-model:visible="showAddGroup"
             @created="onGroupCreated"
@@ -327,18 +377,152 @@ onBeforeUnmount(() => {
 
 <style>
 .rule-permissions {
+    display: flex;
+    flex-direction: column;
     height: 100%;
     font-size: 1.4rem;
     color: var(--p-text-color);
 }
 
+/* Arches sets the root font size to 62.5%, which shrinks rem-based controls. */
+.rule-permissions {
+    --p-button-padding-y: 0.7rem;
+    --p-button-padding-x: 1.4rem;
+    --p-button-icon-only-width: 3.6rem;
+    --p-togglebutton-padding: 0.6rem 1.6rem;
+    --p-checkbox-width: 1.4rem;
+    --p-checkbox-height: 1.4rem;
+    --p-checkbox-icon-size: 1rem;
+    --p-toggleswitch-width: 3.6rem;
+    --p-toggleswitch-height: 2rem;
+    --p-toggleswitch-handle-size: 1.6rem;
+    --p-toggleswitch-gap: 0.2rem;
+    --abac-surface-bg: #f5f6fa;
+    --abac-border: #dde2ef;
+    --abac-text-secondary: #5a6a8a;
+    --abac-accent: #4a90d9;
+    --abac-surface-card: #ffffff;
+    --abac-text-primary: #1a2236;
+    --abac-accent-subtle: #b8d4f0;
+    --abac-accent-tint: rgba(74, 144, 217, 0.1);
+    --abac-row-hover: #e8f2fb;
+    --abac-brand-light: #3d5499;
+    --abac-danger: #e53e3e;
+    --abac-status-active-bg: #f0fdf4;
+    --abac-status-active-text: #166534;
+    --abac-status-active-border: #bbf7d0;
+}
+
+.rule-permissions .p-button,
+.rule-permissions .p-togglebutton,
+.rule-permissions .p-inputtext,
+.rule-permissions .p-textarea,
+.rule-permissions .p-select,
+.rule-permissions .p-select-label,
+.rule-permissions .p-select-option {
+    font-size: 1.4rem;
+}
+
+.rule-permissions .p-inputtext,
+.rule-permissions .p-textarea,
+.rule-permissions .p-select-label {
+    padding: 0.9rem 1rem;
+    font-size: 1.35rem;
+}
+
 .rule-permissions .columns {
     display: grid;
-    grid-template-columns: minmax(24rem, 30rem) minmax(30rem, 1fr) minmax(
-            38rem,
-            52rem
-        );
-    height: 100%;
+    grid-template-columns: 46rem minmax(30rem, 1fr) minmax(38rem, 1fr);
+    grid-template-rows: auto minmax(0, 1fr);
+    flex: 1;
+    min-height: 0;
+}
+
+.rule-permissions .columns {
+    overflow: auto;
+}
+
+.rule-permissions .columns.two-columns {
+    grid-template-columns: 46rem minmax(30rem, 1fr);
+}
+
+@media (max-width: 1200px) {
+    .rule-permissions .columns,
+    .rule-permissions .columns.two-columns {
+        grid-template-columns: 1fr;
+        grid-template-rows: none;
+        grid-auto-rows: minmax(30rem, auto);
+    }
+
+    .rule-permissions .columns .column {
+        display: flex;
+        flex-direction: column;
+        grid-row: auto;
+        border-right: none;
+        border-bottom: 1px solid var(--p-content-border-color);
+    }
+}
+
+.rule-permissions .mode-bar {
+    display: flex;
+    align-items: center;
+    gap: 1.6rem;
+    padding: 1.2rem 2rem;
+    border-bottom: 1px solid var(--abac-border);
+    background: var(--abac-surface-card);
+}
+
+.rule-permissions .mode-title {
+    font-size: 1.4rem;
+    font-weight: 600;
+    color: var(--abac-text-primary);
+}
+
+.rule-permissions .mode-toggle {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem;
+    background: var(--abac-surface-card);
+    border: 1px solid var(--abac-border);
+    border-radius: 0.8rem;
+}
+
+.rule-permissions .mode-option {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.5rem 1.2rem;
+    border: none;
+    border-radius: 0.6rem;
+    background: transparent;
+    color: var(--abac-text-secondary);
+    font: inherit;
+    font-size: 1.25rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.rule-permissions .mode-option i {
+    font-size: 1.1rem;
+}
+
+.rule-permissions .mode-option:hover,
+.rule-permissions .mode-option.active {
+    background: var(--abac-accent-subtle);
+}
+
+.rule-permissions .mode-option.active {
+    color: var(--abac-brand-light);
+}
+
+.rule-permissions .mode-option:focus-visible {
+    outline: 2px solid var(--abac-accent);
+    outline-offset: 1px;
+}
+
+.rule-permissions .toolbar-actions {
+    margin-left: auto;
 }
 
 .rule-permissions .loading {
@@ -347,46 +531,189 @@ onBeforeUnmount(() => {
     padding: 4rem;
 }
 
+/* Subgrid rows keep every column header the same height. */
 .rule-permissions .column {
-    display: flex;
-    flex-direction: column;
+    display: grid;
+    grid-row: span 2;
+    grid-template-rows: subgrid;
     min-height: 0;
-    background: var(--p-content-background);
-    border-right: 1px solid var(--p-content-border-color);
+    background: var(--abac-surface-bg);
+    border-right: 1px solid var(--abac-border);
+}
+
+.rule-permissions .column > :not(.column-header) {
+    min-height: 0;
 }
 
 .rule-permissions .column-header,
 .rule-permissions .toolbar {
     display: flex;
     align-items: center;
-    gap: 0.5rem;
-    padding: 0.75rem 1rem;
-    border-bottom: 1px solid var(--p-content-border-color);
+    gap: 0.8rem;
+    padding: 0.9rem 1.2rem;
+    border-bottom: 1px solid var(--abac-border);
+}
+
+.rule-permissions .column-header {
+    background: var(--abac-surface-bg);
 }
 
 .rule-permissions .column-title {
     margin: 0;
-    font-size: 1.5rem;
+    font-size: 1.3rem;
     font-weight: 600;
+    color: var(--abac-text-secondary);
     display: flex;
     align-items: center;
     gap: 0.5rem;
+    flex-shrink: 0;
+    white-space: nowrap;
+}
+
+.rule-permissions .column-header .p-button {
+    padding: 0.2rem 0.9rem;
+    font-size: 1.3rem;
+    font-weight: 500;
+    line-height: 1.6;
+    gap: 0.4rem;
+    border-radius: 0.4rem;
+    flex-shrink: 0;
+}
+
+.rule-permissions .column-header .p-button .p-button-icon {
+    font-size: 0.9rem;
+}
+
+.rule-permissions .column-header .header-filter {
+    flex: 1;
+    min-width: 6rem;
+    padding: 0.6rem 0.7rem;
+    font-size: 1.15rem;
+    border-radius: 0.5rem;
+}
+
+.rule-permissions .count {
+    font-size: 1.1rem;
+    font-weight: 500;
+    background: var(--abac-border);
+    border-radius: 1rem;
+    padding: 0.1rem 0.7rem;
 }
 
 .rule-permissions .empty {
-    padding: 1.5rem 1rem;
+    padding: 1.6rem;
     text-align: center;
-    color: var(--p-text-muted-color);
+    font-size: 1.25rem;
+    font-style: italic;
+    color: var(--abac-text-secondary);
 }
 
 .rule-permissions .field {
     display: flex;
     flex-direction: column;
-    gap: 0.4rem;
+    gap: 0.6rem;
+    max-width: 90rem;
 }
 
-.rule-permissions .field label {
+.rule-permissions .field label,
+.rule-permissions .section-label {
+    margin: 0;
+    font-size: 1.1rem;
     font-weight: 600;
+    color: var(--abac-text-secondary);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+}
+
+.rule-permissions .status-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    flex-shrink: 0;
+    padding: 0.3rem 0.8rem;
+    border: 1px solid var(--abac-border);
+    border-radius: 2rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--abac-text-secondary);
+    background: var(--abac-surface-bg);
+}
+
+.rule-permissions .status-badge::before {
+    content: "";
+    width: 0.6rem;
+    height: 0.6rem;
+    border-radius: 50%;
+    background: currentColor;
+}
+
+.rule-permissions .status-badge.status-active {
+    color: var(--abac-status-active-text);
+    background: var(--abac-status-active-bg);
+    border-color: var(--abac-status-active-border);
+}
+
+.rule-permissions .more-pill {
+    flex-shrink: 0;
+    padding: 0.1rem 0.6rem;
+    border: 1px solid var(--abac-border);
+    border-radius: 0.8rem;
+    font-size: 1.1rem;
+    font-weight: 600;
+    white-space: nowrap;
+    color: var(--abac-text-secondary);
+    background: var(--abac-surface-bg);
+}
+
+.rule-permissions .row-delete {
+    flex-shrink: 0;
+    padding: 0.3rem 0.5rem;
+    border: none;
+    border-radius: 0.4rem;
+    background: none;
+    color: var(--abac-text-secondary);
+    font-size: 1.5rem;
+    line-height: 1;
+    cursor: pointer;
+}
+
+.rule-permissions .row-delete:hover {
+    color: var(--abac-danger);
+    background: rgba(229, 62, 62, 0.1);
+}
+
+.rule-permissions .link-button {
+    padding: 0 0.2rem;
+    border: none;
+    background: none;
+    color: var(--abac-accent);
+    font: inherit;
+    font-size: 1.15rem;
+    font-weight: 600;
+    text-decoration: underline;
+    text-underline-offset: 2px;
+    white-space: nowrap;
+    cursor: pointer;
+}
+
+.rule-permissions .row-delete:focus-visible,
+.rule-permissions .link-button:focus-visible {
+    outline: 2px solid var(--abac-accent);
+    outline-offset: 1px;
+}
+
+.rule-permissions .group-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.4rem;
+    padding: 0.3rem 0.6rem 0.3rem 1rem;
+    border: 1px solid color-mix(in srgb, var(--abac-accent) 30%, transparent);
+    border-radius: 2rem;
+    background: var(--abac-accent-subtle);
+    color: color-mix(in srgb, var(--abac-accent) 75%, var(--abac-text-primary));
+    font-size: 1.15rem;
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 .rule-permissions .sr-only {

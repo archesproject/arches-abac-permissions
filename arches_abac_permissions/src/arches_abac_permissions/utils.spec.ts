@@ -1,8 +1,11 @@
 import { describe, expect, it } from "vitest";
 
 import {
+    accountDisplayName,
+    accountMatchesFilter,
     draftFromRule,
     draftToPayload,
+    groupHoldings,
     isDraftComplete,
     newDraft,
     ruleMatchesFilter,
@@ -96,5 +99,37 @@ describe("isDraftComplete for resource set rules", () => {
         expect(isDraftComplete(draft)).toBe(false);
         draft.definition = { resource_set_id: "s" };
         expect(isDraftComplete(draft)).toBe(true);
+    });
+});
+
+describe("account helpers", () => {
+    const account = (id: number, groups: number[]) => ({
+        id,
+        username: `u${id}`,
+        first_name: "Ada",
+        last_name: "Lovelace",
+        email: "ada@example.org",
+        is_active: true,
+        is_superuser: false,
+        last_login: null,
+        date_joined: "2024-01-01T00:00:00",
+        groups,
+    });
+
+    it("counts group holdings", () => {
+        expect(groupHoldings([account(1, [1, 2]), account(2, [2])])).toEqual([
+            { groupId: 1, count: 1 },
+            { groupId: 2, count: 2 },
+        ]);
+    });
+
+    it("filters by name, email and group", () => {
+        const a = account(1, []);
+        expect(accountMatchesFilter(a, "lovel", [])).toBe(true);
+        expect(accountMatchesFilter(a, "editors", ["Editors"])).toBe(true);
+        expect(accountMatchesFilter(a, "zzz", [])).toBe(false);
+        expect(
+            accountDisplayName({ ...a, first_name: "", last_name: "" }),
+        ).toBe("u1");
     });
 });

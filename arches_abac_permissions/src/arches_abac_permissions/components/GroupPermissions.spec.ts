@@ -53,29 +53,40 @@ describe("GroupPermissions", () => {
     it("toggles a single permission", async () => {
         const { wrapper, draft } = mountComponent();
         const box = wrapper.find(
-            "input[aria-label='%{ permission } for %{ group }']",
+            "input[aria-label='%{permission} for %{group}']",
         );
         await box.setValue(true);
         expect(draft.grants[1]).toEqual(["read"]);
     });
 
-    it("grants and revokes a permission for all groups", async () => {
+    it("toggles a permission for all groups", async () => {
         const { wrapper, draft } = mountComponent();
-        const grantAll = wrapper.findAll("button.link-button")[0];
-        await grantAll.trigger("click");
+        const grantRead = () => wrapper.findAll("button.grant-button")[0];
+        expect(grantRead().text()).toContain("Grant");
+        await grantRead().trigger("click");
         expect(draft.grants).toEqual({ 1: ["read"], 2: ["read"] });
-        await wrapper.findAll("button.link-button")[1].trigger("click");
+        expect(grantRead().text()).toContain("Revoke");
+        await grantRead().trigger("click");
         expect(draft.grants).toEqual({ 1: [], 2: [] });
     });
 
-    it("selects all and clears one group", async () => {
+    it("grants all to a partially granted permission", async () => {
         const { wrapper, draft } = mountComponent();
-        const rowButtons = wrapper
-            .findAll("tbody tr")[0]
-            .findAll("button.link-button");
-        await rowButtons[0].trigger("click");
+        draft.grants[1] = ["read"];
+        await wrapper.vm.$nextTick();
+        await wrapper.findAll("button.grant-button")[0].trigger("click");
+        expect(draft.grants).toEqual({ 1: ["read"], 2: ["read"] });
+    });
+
+    it("toggles select all and clear for one group", async () => {
+        const { wrapper, draft } = mountComponent();
+        const rowToggle = () =>
+            wrapper.findAll("tbody tr")[0].find("button.link-button");
+        expect(rowToggle().text()).toBe("Select all");
+        await rowToggle().trigger("click");
         expect(draft.grants[1]).toEqual(["read", "update", "delete"]);
-        await rowButtons[1].trigger("click");
+        expect(rowToggle().text()).toBe("Clear selection");
+        await rowToggle().trigger("click");
         expect(draft.grants[1]).toEqual([]);
     });
 });

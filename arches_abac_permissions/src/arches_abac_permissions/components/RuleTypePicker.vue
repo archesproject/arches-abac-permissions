@@ -28,17 +28,20 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
                     class="type-card"
                     @click="emit('pick', ruleType)"
                 >
-                    <i
-                        :class="ruleType.icon"
+                    <span
                         class="type-icon"
                         aria-hidden="true"
-                    ></i>
+                    >
+                        <i :class="ruleType.icon"></i>
+                    </span>
                     <span class="type-body">
-                        <span class="muted">{{
+                        <span class="type-kicker">{{
                             $gettext("Add new rule")
                         }}</span>
                         <span class="type-title">{{ ruleType.label }}</span>
-                        <span class="muted">{{ ruleType.description }}</span>
+                        <span class="type-description">{{
+                            ruleType.description
+                        }}</span>
                     </span>
                 </button>
             </li>
@@ -48,66 +51,90 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 
 <style scoped>
 .picker {
-    padding: 2rem;
+    padding: 2.8rem 3.2rem;
 }
 
 .prompt {
-    margin: 0 0 1.5rem;
-    color: var(--p-text-muted-color);
+    margin: 0 0 1rem;
+    font-size: 1.6rem;
+    color: var(--abac-text-secondary);
 }
 
 .type-list {
     list-style: none;
     margin: 0;
     padding: 0;
-    display: flex;
-    flex-direction: column;
-    gap: 1rem;
-    max-width: 60rem;
+    display: grid;
+    grid-template-columns: repeat(auto-fill, minmax(30rem, 1fr));
+    gap: 1.4rem;
 }
 
 .type-card {
     width: 100%;
+    height: 100%;
     display: flex;
+    flex-direction: column;
     align-items: center;
-    gap: 1.5rem;
-    padding: 1.25rem 1.5rem;
-    border: 1px solid var(--p-content-border-color);
-    border-radius: 0.5rem;
-    background: var(--p-content-background);
-    color: inherit;
+    gap: 1.4rem;
+    padding: 4rem 2.2rem 6rem;
+    border: 1px solid var(--abac-border);
+    border-radius: 1rem;
+    background: var(--abac-surface-card);
+    color: var(--abac-text-primary);
     font: inherit;
-    text-align: left;
+    text-align: center;
     cursor: pointer;
+    transition:
+        background 0.12s,
+        border-color 0.12s;
 }
 
 .type-card:hover {
-    border-color: var(--p-primary-color);
-    background: var(--p-content-hover-background);
+    border-color: var(--abac-accent);
+    background: var(--abac-row-hover);
 }
 
 .type-card:focus-visible {
-    outline: 2px solid var(--p-primary-color);
+    outline: 2px solid var(--abac-accent);
     outline-offset: 2px;
 }
 
 .type-icon {
-    font-size: 2.4rem;
-    color: var(--p-primary-color);
+    width: 4.8rem;
+    height: 4.8rem;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    border: 1px solid var(--abac-border);
+    border-radius: 1rem;
+    background: var(--abac-surface-bg);
+    color: var(--abac-accent);
+    font-size: 2rem;
+}
+
+.type-icon i {
+    font-size: inherit;
 }
 
 .type-body {
     display: flex;
     flex-direction: column;
-    gap: 0.25rem;
+    gap: 0.4rem;
+}
+
+.type-kicker {
+    font-size: 1.6rem;
+    color: var(--abac-text-secondary);
 }
 
 .type-title {
-    font-size: 1.6rem;
-    font-weight: 600;
+    font-size: 1.8rem;
+    font-weight: 700;
 }
 
-.muted {
-    color: var(--p-text-muted-color);
+.type-description {
+    font-size: 1.25rem;
+    line-height: 1.55;
+    color: var(--abac-text-secondary);
 }
 </style>
