@@ -234,11 +234,16 @@ onBeforeUnmount(() => {
                 @click="clearArea"
             />
         </div>
+        <!-- Vue must not bind classes on maplibre's container; it'd drop maplibre's own. -->
         <div
-            ref="container"
-            class="map-container"
+            class="map-frame"
             :class="{ drawing: isDrawing }"
-        ></div>
+        >
+            <div
+                ref="container"
+                class="map-container"
+            ></div>
+        </div>
         <p
             class="area-status"
             role="status"
@@ -263,19 +268,24 @@ onBeforeUnmount(() => {
     gap: 0.6rem;
 }
 
-.map-container {
+.map-frame {
     height: 36rem;
     border: 1px solid var(--abac-border);
     border-radius: 0.6rem;
     overflow: hidden;
 }
 
-.map-container:focus-within {
+.map-container {
+    position: relative;
+    height: 100%;
+}
+
+.map-frame:focus-within {
     outline: 2px solid var(--abac-accent);
     outline-offset: 2px;
 }
 
-.map-container.drawing :deep(.maplibregl-canvas-container) {
+.map-frame.drawing :deep(.maplibregl-canvas-container) {
     cursor: crosshair;
 }
 

@@ -170,7 +170,7 @@ function applyGeoJson() {
         >
             {{
                 $gettext(
-                    "Matches resources with a geometry that intersects the area. Choose Draw Polygon, then click to add points and click the first point or press Enter to finish. Or edit the area as GeoJSON below.",
+                    "Matches resources with a geometry that intersects the area.",
                 )
             }}
         </p>
