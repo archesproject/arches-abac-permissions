@@ -18,6 +18,8 @@ class InclusionRule(models.Model):
         User, db_column="owner_id", on_delete=deletion.SET_NULL, null=True
     )
     name = models.TextField()
+    description = models.TextField(blank=True, default="")
+    active = models.BooleanField(default=True)
     modulename = models.TextField(blank=True, null=True)
     classname = models.TextField(blank=True, null=True)
     definition = models.JSONField()

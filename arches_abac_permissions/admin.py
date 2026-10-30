@@ -11,8 +11,8 @@ class InclusionRuleGroupPermissionInline(admin.StackedInline):
 
 @admin.register(InclusionRule)
 class InclusionRuleAdmin(admin.ModelAdmin):
-    list_display = ["name", "classname", "owner", "created"]
-    list_filter = ["classname"]
+    list_display = ["name", "classname", "active", "owner", "created"]
+    list_filter = ["classname", "active"]
     search_fields = ["name"]
     readonly_fields = ["inclusionruleid", "created"]
     inlines = [InclusionRuleGroupPermissionInline]
