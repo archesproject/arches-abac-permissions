@@ -32,8 +32,9 @@ runs:
       shell: bash
     
     - name: Ensure frontend configuration files exist
+      # Match the apps enabled for tests; dev installs optional arches_resource_sets.
       run: |
-          python manage.py check
+          python manage.py check --settings="tests.test_settings"
       shell: bash
 
     - name: Install Arches applications
