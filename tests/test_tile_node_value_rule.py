@@ -130,7 +130,7 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
         ):
             with self.subTest(datatype=datatype):
                 rule = self.make_value_rule(datatype, value, **extra)
-                rule.full_clean()
+                rule.clean()
                 self.assertMatchesOnlyHit(rule)
 
     def test_string_language(self):
@@ -170,7 +170,7 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
                     definition=definition,
                 )
                 with self.assertRaises(ValidationError):
-                    rule.full_clean()
+                    rule.clean()
 
     def test_index_sql(self):
         node = self.nodes["number"]
@@ -209,12 +209,12 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
         )
         self.nodes["reference"] = node
         rule = self.make_value_rule("reference", str(item.pk))
-        rule.full_clean()
+        rule.clean()
         self.assertEqual(set(rule.get_matching_resources()), {self.hit})
 
         other = self.make_value_rule("reference", str(uuid.uuid4()))
         with self.assertRaises(ValidationError):
-            other.full_clean()
+            other.clean()
 
 
 class TileNodeValueApiTests(TileNodeValueTestCase):
