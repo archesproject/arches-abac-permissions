@@ -27,6 +27,7 @@ DATATYPE_LOCATIONS.append("arches_abac_permissions.datatypes")
 FUNCTION_LOCATIONS.append("arches_abac_permissions.functions")
 ETL_MODULE_LOCATIONS.append("arches_abac_permissions.etl_modules")
 SEARCH_COMPONENT_LOCATIONS.append("arches_abac_permissions.search_components")
+RULE_LOCATIONS = []  # read by arches module_importer for RuleExtensionType.RULES
 
 LOCALE_PATHS.insert(0, os.path.join(APP_ROOT, "locale"))
 
