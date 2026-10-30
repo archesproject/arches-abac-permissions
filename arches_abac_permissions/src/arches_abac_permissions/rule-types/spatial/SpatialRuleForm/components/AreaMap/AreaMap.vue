@@ -244,11 +244,16 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
                 @click="clearArea"
             />
         </div>
+        <!-- Vue must not bind classes on maplibre's container; it'd drop maplibre's own. -->
         <div
-            ref="container"
-            class="map-container"
+            class="map-frame"
             :class="{ drawing: isDrawing }"
-        />
+        >
+            <div
+                ref="container"
+                class="map-container"
+            />
+        </div>
         <p
             class="area-status"
             role="status"
@@ -273,7 +278,7 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     gap: 0.6rem;
 }
 
-.map-container {
+.map-frame {
     block-size: 36rem;
     background: var(--p-abac-surface-bg);
     border: 0.1rem solid var(--p-abac-border);
@@ -281,12 +286,17 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     overflow: hidden;
 }
 
-.map-container:focus-within {
+.map-container {
+    position: relative;
+    block-size: 100%;
+}
+
+.map-frame:focus-within {
     outline: 0.2rem solid var(--p-abac-accent);
     outline-offset: 0.2rem;
 }
 
-.map-container.drawing :deep(.maplibregl-canvas-container) {
+.map-frame.drawing :deep(.maplibregl-canvas-container) {
     cursor: crosshair;
 }
 
