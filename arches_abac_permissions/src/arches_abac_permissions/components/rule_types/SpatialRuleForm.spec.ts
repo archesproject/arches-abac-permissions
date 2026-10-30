@@ -68,7 +68,7 @@ function lastDefinition(wrapper: ReturnType<typeof mountForm>) {
 describe("SpatialRuleForm", () => {
     beforeEach(() => {
         api.fetchMapConfig.mockResolvedValue({
-            basemaps: [],
+            basemap: null,
             bounds: null,
             min_zoom: 0,
             max_zoom: 20,

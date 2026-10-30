@@ -24,6 +24,8 @@ from arches_abac_permissions.rules.spatial_rule import GEOMETRY_DATATYPE
 from arches_abac_permissions.rules.tile_node_value_rule import get_supported_datatypes
 
 GROUP_NAME_MAX_LENGTH = 150
+# Core's Maptoolkit basemap (Arches 8.2).
+STREETS_BASEMAP = "streets"
 CODENAME_TO_PERMISSION = {value: key for key, value in PERMISSION_CODENAMES.items()}
 
 
@@ -388,31 +390,25 @@ class ControlledListItemsView(SuperuserAPIView):
 
 
 class MapConfigView(SuperuserAPIView):
-    """Basemaps and defaults for drawing a spatial rule's area."""
+    """Core's streets basemap and defaults for drawing a spatial rule's area."""
 
     def get(self, request):
-        sources = {source.name: source.source for source in MapSource.objects.all()}
-        basemaps = []
-        for layer in MapLayer.objects.filter(isoverlay=False, activated=True).order_by(
-            "sortorder", "name"
-        ):
+        basemap = None
+        layer = MapLayer.objects.filter(name=STREETS_BASEMAP, isoverlay=False).first()
+        if layer:
             definitions = [
                 definition
                 for definition in layer.layerdefinitions or []
                 if isinstance(definition, dict)
             ]
             names = {definition.get("source") for definition in definitions}
-            basemaps.append(
-                {
-                    "id": str(layer.pk),
-                    "name": str(layer.name),
-                    "is_default": layer.addtomap,
-                    "layers": definitions,
-                    "sources": {
-                        name: sources[name] for name in names if name in sources
-                    },
-                }
-            )
+            basemap = {
+                "layers": definitions,
+                "sources": {
+                    source.name: source.source
+                    for source in MapSource.objects.filter(name__in=names)
+                },
+            }
         bounds = (
             GeoUtils().get_bounds_from_geojson(settings.DEFAULT_BOUNDS)
             if settings.DEFAULT_BOUNDS
@@ -420,7 +416,7 @@ class MapConfigView(SuperuserAPIView):
         )
         return JSONResponse(
             {
-                "basemaps": basemaps,
+                "basemap": basemap,
                 "bounds": list(bounds) if bounds else None,
                 "min_zoom": settings.MAP_MIN_ZOOM,
                 "max_zoom": settings.MAP_MAX_ZOOM,

@@ -220,24 +220,19 @@ class SpatialApiTests(SpatialTestCase):
             name="abac-test-tiles",
             source={"type": "raster", "tiles": ["https://example.com/{z}/{x}/{y}"]},
         )
-        layer = MapLayer.objects.create(
-            name="ABAC test basemap",
+        MapLayer.objects.filter(name="streets").delete()
+        MapLayer.objects.create(
+            name="streets",
             isoverlay=False,
-            addtomap=True,
             icon="",
             layerdefinitions=[
                 {"id": "abac-test", "type": "raster", "source": "abac-test-tiles"}
             ],
         )
         MapLayer.objects.create(
-            name="ABAC test overlay", isoverlay=True, icon="", layerdefinitions=[]
+            name="Other basemap", isoverlay=False, icon="", layerdefinitions=[]
         )
         config = self.client.get(reverse("abac_map_config")).json()
-        basemaps = {basemap["id"]: basemap for basemap in config["basemaps"]}
-        self.assertNotIn(
-            "ABAC test overlay", [basemap["name"] for basemap in config["basemaps"]]
-        )
-        basemap = basemaps[str(layer.pk)]
-        self.assertTrue(basemap["is_default"])
-        self.assertEqual(list(basemap["sources"]), ["abac-test-tiles"])
+        self.assertEqual(config["basemap"]["layers"][0]["id"], "abac-test")
+        self.assertEqual(list(config["basemap"]["sources"]), ["abac-test-tiles"])
         self.assertIn("glyphs", config)

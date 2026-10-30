@@ -52,15 +52,12 @@ export interface TileNode {
 }
 
 export interface Basemap {
-    id: string;
-    name: string;
-    is_default: boolean;
     layers: Record<string, unknown>[];
     sources: Record<string, Record<string, unknown>>;
 }
 
 export interface MapConfig {
-    basemaps: Basemap[];
+    basemap: Basemap | null;
     // [west, south, east, north]
     bounds: [number, number, number, number] | null;
     min_zoom: number;
