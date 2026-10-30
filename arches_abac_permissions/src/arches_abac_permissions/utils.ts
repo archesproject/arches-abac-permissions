@@ -1,6 +1,7 @@
 import {
     PERMISSION_NAMES,
     RESOURCE_SET,
+    TILE_NODE_VALUE,
 } from "@/arches_abac_permissions/constants.ts";
 
 import type {
@@ -8,6 +9,7 @@ import type {
     Group,
     PermissionName,
     Rule,
+    RuleDefinition,
     RuleDraft,
 } from "@/arches_abac_permissions/types";
 
@@ -143,9 +145,27 @@ export function isDraftComplete(draft: RuleDraft): boolean {
     if (draft.rule_type === RESOURCE_SET) {
         return Boolean(draft.definition.resource_set_id);
     }
+    if (draft.rule_type === TILE_NODE_VALUE) {
+        return Boolean(
+            draft.definition.graphid &&
+                draft.definition.nodeid &&
+                draft.definition.value?.trim(),
+        );
+    }
     return Boolean(
         draft.definition.graphid && draft.definition.lifecycle_state_id,
     );
+}
+
+// Compares definitions ignoring key order and empty values.
+export function sameDefinition(a: RuleDefinition, b: RuleDefinition): boolean {
+    const canonical = (definition: RuleDefinition) =>
+        JSON.stringify(
+            Object.entries(definition)
+                .filter(([, value]) => value !== undefined && value !== "")
+                .sort(([x], [y]) => x.localeCompare(y)),
+        );
+    return canonical(a) === canonical(b);
 }
 
 export function accountDisplayName(account: Account): string {

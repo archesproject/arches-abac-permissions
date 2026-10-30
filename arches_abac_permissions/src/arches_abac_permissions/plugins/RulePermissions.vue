@@ -74,6 +74,9 @@ const modeOptions = computed<
 const draft = ref<RuleDraft | null>(null);
 const savedSnapshot = ref("");
 
+const savedRule = computed(
+    () => rules.value.find((rule) => rule.id === draft.value?.id) ?? null,
+);
 const isDirty = computed(
     () =>
         draft.value !== null &&
@@ -350,6 +353,7 @@ onBeforeUnmount(() => {
                     :rule-types="ruleTypes"
                     :resource-models="resourceModels"
                     :resource-sets="resourceSets"
+                    :saved-rule="savedRule"
                     @pick="pickRuleType"
                 />
                 <GroupPermissions

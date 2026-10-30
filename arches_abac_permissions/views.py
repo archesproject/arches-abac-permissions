@@ -8,8 +8,9 @@ from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
 
-from arches.app.models.models import GraphModel
+from arches.app.models.models import GraphModel, Language, Node
 from arches.app.models.system_settings import settings
+from arches.app.utils.i18n import get_localized_value
 from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches.app.views.api import APIBase
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
@@ -18,6 +19,7 @@ from arches_abac_permissions.rule_types import (
     RULE_TYPES,
     get_rule_type_for_classname,
 )
+from arches_abac_permissions.rules.tile_node_value_rule import get_supported_datatypes
 
 GROUP_NAME_MAX_LENGTH = 150
 CODENAME_TO_PERMISSION = {value: key for key, value in PERMISSION_CODENAMES.items()}
@@ -68,6 +70,10 @@ def serialize_rule(rule):
             }
         )
     group_permissions.sort(key=lambda grant: grant["groupid"])
+    try:
+        index_sql = rule.get_index_sql_for_rule()
+    except (ValidationError, ImportError, AttributeError):
+        index_sql = None
     return {
         "id": str(rule.pk),
         "name": rule.name,
@@ -76,6 +82,7 @@ def serialize_rule(rule):
         "rule_type": rule_type.key if rule_type else None,
         "definition": rule.definition,
         "group_permissions": group_permissions,
+        "index_sql": index_sql,
     }
 
 
@@ -282,6 +289,91 @@ class ResourceSetsView(SuperuserAPIView):
         ]
         resource_sets.sort(key=lambda resource_set: resource_set["name"].lower())
         return JSONResponse({"resource_sets": resource_sets})
+
+
+def serialize_node(node):
+    config = node.config or {}
+    data = {
+        "nodeid": str(node.pk),
+        "name": node.name,
+        "alias": node.alias,
+        "datatype": node.datatype,
+    }
+    if node.datatype in ("domain-value", "domain-value-list"):
+        data["options"] = [
+            {
+                "id": str(option.get("id")),
+                "label": get_localized_value(option.get("text", "")),
+            }
+            for option in config.get("options") or []
+        ]
+    elif node.datatype == "boolean":
+        data["true_label"] = get_localized_value(config.get("trueLabel") or "") or _(
+            "True"
+        )
+        data["false_label"] = get_localized_value(config.get("falseLabel") or "") or _(
+            "False"
+        )
+    elif node.datatype == "date":
+        data["date_format"] = config.get("dateFormat") or ""
+    elif node.datatype == "reference":
+        list_id = config.get("controlledList")
+        data["controlled_list_id"] = str(list_id) if list_id else None
+    return data
+
+
+class ResourceModelNodesView(SuperuserAPIView):
+    def get(self, request, graph_id):
+        nodes = Node.objects.filter(
+            graph_id=graph_id,
+            graph__isresource=True,
+            datatype__in=get_supported_datatypes(),
+        )
+        serialized = [serialize_node(node) for node in nodes]
+        serialized.sort(key=lambda node: node["name"].lower())
+        return JSONResponse({"nodes": serialized})
+
+
+class LanguagesView(SuperuserAPIView):
+    def get(self, request):
+        languages = Language.objects.order_by("name")
+        return JSONResponse(
+            {
+                "languages": [
+                    {"code": language.code, "name": language.name}
+                    for language in languages
+                ]
+            }
+        )
+
+
+class ControlledListItemsView(SuperuserAPIView):
+    def get(self, request, list_id):
+        if not apps.is_installed("arches.extensions.controlled_lists"):
+            return JSONResponse({"items": []})
+        from arches.extensions.controlled_lists.models import ListItem
+
+        items = ListItem.objects.filter(list_id=list_id).with_list_item_labels()
+        children = {}
+        for item in items:
+            children.setdefault(item.parent_id, []).append(item)
+
+        # Depth-first, so children follow their parent.
+        flattened = []
+
+        def visit(parent_id, depth):
+            for item in sorted(children.get(parent_id, []), key=lambda i: i.sortorder):
+                flattened.append(
+                    {
+                        "id": str(item.pk),
+                        "label": item.find_best_label() or item.uri,
+                        "depth": depth,
+                    }
+                )
+                visit(item.pk, depth + 1)
+
+        visit(None, 0)
+        return JSONResponse({"items": flattened})
 
 
 def serialize_group(group):

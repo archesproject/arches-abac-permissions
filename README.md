@@ -112,7 +112,7 @@ pip install -e arches-abac-permissions --group dev
 Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
 
 - **Rules** (left): filter, add, and delete rules.
-- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*, or a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed). *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`.
+- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed), or a resource model, node and value for *Resource has Node Value*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
 - **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members cannot be deleted. **Save** stores the rule, its definition and all grants together.
 
 The **Group Membership** view (switch at the top) lists groups, accounts and an editor. Filter accounts by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
@@ -142,6 +142,7 @@ Things to be aware of:
 |---|---|---|
 | `lifecycle_state_rule.py` | `LifecycleStateRule` | Resources of a graph that are in a given lifecycle state |
 | `resource_set_rule.py` | `ResourceSetRule` | The members of an [arches-resource-sets](https://github.com/archesproject/arches-resource-sets) resource set |
+| `tile_node_value_rule.py` | `TileNodeValueRule` | Resources of a graph with a tile whose node holds a given value |
 | `search_rule.py` | `SearchRule` | Not yet evaluated; stores a saved search query |
 | `queryset_rule.py` | `QuerySetRule` | Not yet evaluated |
 
@@ -255,6 +256,48 @@ Things to be aware of:
 
 - **Deleting the set, or the user who owns it, removes the access silently.** The rule then matches nothing, and nothing is logged.
 
+## Creating a tile node value rule
+
+A tile node value rule grants permissions on every resource of a resource model that has a tile whose node holds a given value, for example every **Person** whose *Classification* is **Staff**. It reads the `tiles` table directly, so it doesn't need arches-search. Editing the tile changes access straight away.
+
+Create it in the plugin (*Resource has Node Value*) or in the admin with modulename `tile_node_value_rule.py`, classname `TileNodeValueRule` and definition:
+
+```json
+{
+    "graphid": "<id of the resource model>",
+    "nodeid": "<id of a node of that model>",
+    "value": "<the value, always as a string>",
+    "language": "<language code; string nodes only, empty for any language>"
+}
+```
+
+| Node datatype | `value` | Matches when |
+|---|---|---|
+| `string` | Text | The text in `language` (or any language) equals `value` |
+| `non-localized-string` | Text | The text equals `value` |
+| `number` | A number, e.g. `"5"` or `"2.5"` | The number equals `value` |
+| `boolean` | `"true"` or `"false"` | The value is the same |
+| `date` | The date as stored, e.g. `"2020-01-31"` | The stored text equals `value` |
+| `domain-value`, `domain-value-list` | The option id | The node holds that option |
+| `resource-instance`, `resource-instance-list` | The related resource's id | The node relates to that resource |
+| `reference` | The controlled list item id | The node holds that list item (needs `arches.extensions.controlled_lists`) |
+
+Things to be aware of:
+
+- **Matching is exact.** Text is case sensitive and must match the whole value; dates aren't compared as dates.
+- Concept and concept-list nodes, and other datatypes, aren't supported.
+- **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
+
+## Indexes for rules
+
+Rules are evaluated with SQL whenever permissions are checked, so a large database may need an index for them. The plugin shows the SQL for a saved rule under **Index SQL**, and `InclusionRule.get_index_sql_for_rule()` returns it. Run it against the Arches database with `psql`, outside a transaction (`CREATE INDEX CONCURRENTLY` can't run in one).
+
+- *Resource has Lifecycle State*: one index on `resource_instances (graphid, resource_instance_lifecycle_state_id)`, shared by every such rule.
+- *Resource is in Resource Set*: none; the set membership table is already indexed.
+- *Resource has Node Value*: a partial GIN index on the node's value in `tiles`, one per node. Rules on the same node share it.
+
+Custom rule classes can return their own SQL from a `get_index_sql(cls, inclusion_rule)` classmethod; the default returns `None`.
+
 ## Adding custom rules to your project
 
 You can write your own rule classes in your Arches project; they don't have to live in this package. The examples below use a project called `my_project`.
@@ -312,7 +355,7 @@ class MyRule(InclusionRule):
 
 - Rule classes are **proxy models** of `InclusionRule`, so they share its table and add no columns.
 - Set `app_label` to your project's app label, or leave it out. **Don't copy `app_label = "arches_abac_permissions"`** from the built-in rules: if you do, `makemigrations` will try to write your rule's migration into this package.
-- **Give the module a name the built-in rules don't use** (not `lifecycle_state_rule`, `search_rule` or `queryset_rule`). Lookup uses the first match in `INSTALLED_APPS` order, so a duplicate name could load the wrong class.
+- **Give the module a name the built-in rules don't use** (not `lifecycle_state_rule`, `resource_set_rule`, `tile_node_value_rule`, `search_rule` or `queryset_rule`). Lookup uses the first match in `INSTALLED_APPS` order, so a duplicate name could load the wrong class.
 
 See `arches_abac_permissions/rules/lifecycle_state_rule.py` for a complete example.
 

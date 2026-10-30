@@ -4,10 +4,13 @@ import Cookies from "js-cookie";
 import type {
     Account,
     Group,
+    Language,
+    ListItemOption,
     ResourceModel,
     ResourceSet,
     Rule,
     RuleTypeInfo,
+    TileNode,
 } from "@/arches_abac_permissions/types";
 
 function getToken() {
@@ -79,6 +82,24 @@ export const fetchResourceSets = async () =>
             arches.urls.abac_resource_sets,
         )
     ).resource_sets;
+
+export const fetchResourceModelNodes = async (graphid: string) =>
+    (
+        await request<{ nodes: TileNode[] }>(
+            arches.urls.abac_resource_model_nodes(graphid),
+        )
+    ).nodes;
+
+export const fetchLanguages = async () =>
+    (await request<{ languages: Language[] }>(arches.urls.abac_languages))
+        .languages;
+
+export const fetchControlledListItems = async (listId: string) =>
+    (
+        await request<{ items: ListItemOption[] }>(
+            arches.urls.abac_controlled_list_items(listId),
+        )
+    ).items;
 
 export const fetchGroups = async () =>
     (await request<{ groups: Group[] }>(arches.urls.abac_groups)).groups;

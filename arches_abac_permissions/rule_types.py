@@ -44,6 +44,15 @@ RULE_TYPES = {
         definition_keys=("resource_set_id",),
         required_app="arches_resource_sets",
     ),
+    "tile_node_value": RuleType(
+        key="tile_node_value",
+        modulename="tile_node_value_rule.py",
+        classname="TileNodeValueRule",
+        label=_("Resource has Node Value"),
+        description=_("Matches resources with a tile whose node holds a value"),
+        icon="pi pi-tag",
+        definition_keys=("graphid", "nodeid", "value", "language"),
+    ),
 }
 
 # UI permission name -> resource instance permission codename.
