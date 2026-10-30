@@ -68,6 +68,9 @@ const modeOptions = computed<
 const draft = ref<RuleDraft | null>(null);
 const savedSnapshot = ref("");
 
+const savedRule = computed(
+    () => rules.value.find((rule) => rule.id === draft.value?.id) ?? null,
+);
 const isDirty = computed(
     () =>
         draft.value !== null &&
@@ -337,6 +340,7 @@ async function loadData(): Promise<void> {
                 <RuleConfiguration
                     v-model="draft"
                     :rule-types="ruleTypes"
+                    :saved-rule="savedRule"
                     @pick="pickRuleType"
                 />
                 <GroupPermissions

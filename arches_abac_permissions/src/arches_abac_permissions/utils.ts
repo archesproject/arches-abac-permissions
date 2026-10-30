@@ -6,6 +6,7 @@ import type {
     Group,
     PermissionName,
     Rule,
+    RuleDefinition,
     RuleDraft,
 } from "@/arches_abac_permissions/types";
 
@@ -141,6 +142,17 @@ export function isDraftComplete(draft: RuleDraft): boolean {
     return Boolean(
         getRuleTypeForKey(draft.rule_type)?.isComplete(draft.definition),
     );
+}
+
+// Compares definitions ignoring key order and empty values.
+export function sameDefinition(a: RuleDefinition, b: RuleDefinition): boolean {
+    const canonical = (definition: RuleDefinition): string =>
+        JSON.stringify(
+            Object.entries(definition)
+                .filter(([, value]) => value !== undefined && value !== "")
+                .sort(([x], [y]) => x.localeCompare(y)),
+        );
+    return canonical(a) === canonical(b);
 }
 
 export function userDisplayName(user: User): string {

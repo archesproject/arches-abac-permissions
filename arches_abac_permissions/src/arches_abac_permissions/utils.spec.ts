@@ -8,6 +8,7 @@ import {
     groupHoldings,
     isDraftComplete,
     newDraft,
+    sameDefinition,
     ruleMatchesFilter,
     serializeDraft,
     setGroupPermissions,
@@ -25,6 +26,7 @@ const rule: Rule = {
     rule_type: "lifecycle_state",
     definition: { graphid: "g", lifecycle_state_id: "s" },
     group_permissions: [{ groupid: 2, permissions: ["delete", "read"] }],
+    index_sql: null,
 };
 
 const groups: Group[] = [
@@ -65,6 +67,27 @@ describe("drafts", () => {
         draft.name = "Name";
         draft.definition = { graphid: "g", lifecycle_state_id: "s" };
         expect(isDraftComplete(draft)).toBe(true);
+    });
+
+    it("requires a model, node and value for tile node value rules", () => {
+        const draft = newDraft("tile_node_value");
+        draft.name = "Name";
+        draft.definition = { graphid: "g", nodeid: "n", value: "  " };
+        expect(isDraftComplete(draft)).toBe(false);
+        draft.definition.value = "x";
+        expect(isDraftComplete(draft)).toBe(true);
+        draft.definition.nodeid = undefined;
+        expect(isDraftComplete(draft)).toBe(false);
+    });
+
+    it("compares definitions ignoring key order and empty values", () => {
+        expect(
+            sameDefinition(
+                { graphid: "g", nodeid: "n", language: "" },
+                { nodeid: "n", graphid: "g" },
+            ),
+        ).toBe(true);
+        expect(sameDefinition({ value: "a" }, { value: "b" })).toBe(false);
     });
 });
 
