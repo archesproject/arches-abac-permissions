@@ -76,7 +76,7 @@ describe("SpatialRuleForm", () => {
             { graphid: "g", name: "Places" },
         ]);
         api.fetchMapConfig.mockResolvedValue({
-            basemaps: [],
+            basemap: null,
             bounds: null,
             min_zoom: 0,
             max_zoom: 20,

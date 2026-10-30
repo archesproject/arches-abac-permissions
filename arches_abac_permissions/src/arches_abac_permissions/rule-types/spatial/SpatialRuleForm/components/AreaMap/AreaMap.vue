@@ -11,7 +11,6 @@ import {
 import "maplibre-gl/dist/maplibre-gl.css";
 
 import Button from "openvue/button";
-import Select from "openvue/select";
 
 import {
     areaOf,
@@ -47,7 +46,6 @@ new URL("maplibre-gl/dist/maplibre-gl-shared.mjs?asset", import.meta.url);
 
 const DRAW_POLYGON = "draw_polygon";
 const SIMPLE_SELECT = "simple_select";
-const DRAW_SOURCES = ["mapbox-gl-draw-cold", "mapbox-gl-draw-hot"];
 
 const props = defineProps<{ config: MapConfig; describedBy?: string }>();
 const area = defineModel<AreaGeometry | undefined>({ required: true });
@@ -55,12 +53,6 @@ const area = defineModel<AreaGeometry | undefined>({ required: true });
 const { $gettext, $ngettext } = useGettext();
 
 const container = ref<HTMLElement>();
-const basemapId = ref(
-    (
-        props.config.basemaps.find((basemap) => basemap.is_default) ??
-        props.config.basemaps[0]
-    )?.id,
-);
 const isDrawing = ref(false);
 const hasSelection = ref(false);
 
@@ -88,37 +80,11 @@ watch(area, (geometry) => {
     }
 });
 
-// Carries Draw's sources and layers over, since setStyle would drop them.
-watch(basemapId, (selected) => {
-    map?.setStyle(buildStyle(selected), {
-        diff: false,
-        transformStyle: (previous, next) => ({
-            ...next,
-            sources: {
-                ...next.sources,
-                ...Object.fromEntries(
-                    Object.entries(previous?.sources ?? {}).filter(([id]) =>
-                        DRAW_SOURCES.includes(id),
-                    ),
-                ),
-            },
-            layers: [
-                ...next.layers,
-                ...(previous?.layers ?? []).filter(
-                    (layer) =>
-                        "source" in layer &&
-                        DRAW_SOURCES.includes(layer.source as string),
-                ),
-            ],
-        }),
-    });
-});
-
 onMounted(() => {
     const bounds = boundsOf(area.value) ?? props.config.bounds ?? undefined;
     map = new MapLibreMap({
         container: container.value!,
-        style: buildStyle(basemapId.value),
+        style: buildStyle(),
         bounds,
         fitBoundsOptions: { padding: 40, maxZoom: 16 },
         minZoom: props.config.min_zoom,
@@ -157,12 +123,10 @@ onBeforeUnmount(() => {
     isLoaded = false;
 });
 
-// Only the selected basemap is styled, as in core: one invalid layer would
-// stop the whole style loading. Layers without their source are dropped.
-function buildStyle(selected: string | undefined): StyleSpecification {
-    const basemap = props.config.basemaps.find(({ id }) => id === selected);
-    const sources = basemap?.sources ?? {};
-    const layers = (basemap?.layers ?? []).filter(
+// Layers without their source are dropped; one would stop the style loading.
+function buildStyle(): StyleSpecification {
+    const sources = props.config.basemap?.sources ?? {};
+    const layers = (props.config.basemap?.layers ?? []).filter(
         (layer) => !layer.source || (layer.source as string) in sources,
     );
     return {
@@ -279,16 +243,6 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
                 :disabled="!polygonCount"
                 @click="clearArea"
             />
-            <Select
-                v-if="config.basemaps.length > 1"
-                v-model="basemapId"
-                class="basemap-picker"
-                :options="config.basemaps"
-                option-label="name"
-                option-value="id"
-                size="small"
-                :aria-label="$gettext('Basemap')"
-            />
         </div>
         <div
             ref="container"
@@ -317,10 +271,6 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     flex-wrap: wrap;
     align-items: center;
     gap: 0.6rem;
-}
-
-.basemap-picker {
-    margin-inline-start: auto;
 }
 
 .map-container {

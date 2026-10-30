@@ -296,7 +296,7 @@ Things to be aware of:
 
 A spatial rule grants permissions on every resource of a resource model with a geometry, in a given geometry node, that intersects an area, for example every **Heritage Asset** whose *Location* is partly inside a district. It reads Arches' `geojson_geometries` table, so editing the geometry changes access straight away.
 
-Create it in the plugin (*Resource is in Area*), where you draw the area on the project's basemaps or paste GeoJSON under **Edit as GeoJSON**, or in the admin with modulename `spatial_rule.py`, classname `SpatialRule` and definition:
+Create it in the plugin (*Resource is in Area*), where you draw the area on core's `streets` basemap or paste GeoJSON under **Edit as GeoJSON**, or in the admin with modulename `spatial_rule.py`, classname `SpatialRule` and definition:
 
 ```json
 {
