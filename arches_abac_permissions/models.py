@@ -1,8 +1,10 @@
 import uuid
 
 from django.contrib.auth.models import Group, Permission, User
+from django.core.exceptions import ValidationError
 from django.db import models
 from django.db.models import deletion
+from django.utils.translation import gettext_lazy as _
 
 from arches.app.utils.module_importer import get_class_from_modulename
 from arches_abac_permissions.const import RuleExtensionType
@@ -25,6 +27,42 @@ class InclusionRule(models.Model):
         return get_class_from_modulename(
             self.modulename, self.classname, RuleExtensionType.RULES
         )
+
+    @classmethod
+    def validate_definition(cls, inclusion_rule):
+        """
+        Raise ValidationError if ``inclusion_rule.definition`` is not valid
+        for this rule class. Rule classes override this to check their own
+        definition; the default accepts any definition.
+        """
+
+    def clean(self):
+        super().clean()
+        if not self.modulename or not self.classname:
+            raise ValidationError(
+                _("An inclusion rule requires a modulename and a classname.")
+            )
+        try:
+            rule_class = self.get_class_module()
+        except (ImportError, AttributeError):
+            rule_class = None
+        if not (isinstance(rule_class, type) and issubclass(rule_class, InclusionRule)):
+            raise ValidationError(
+                {
+                    "classname": _(
+                        "No rule class %(classname)s was found in module %(modulename)s."
+                    )
+                    % {"classname": self.classname, "modulename": self.modulename}
+                }
+            )
+        if not isinstance(self.definition, dict):
+            raise ValidationError(
+                {"definition": _("The definition must be a JSON object.")}
+            )
+        try:
+            rule_class.validate_definition(self)
+        except ValidationError as e:
+            raise ValidationError({"definition": e.messages})
 
     def get_search_rule_url(self):
         return self.get_class_module().get_search_rule_url(self)

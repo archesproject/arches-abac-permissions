@@ -15,7 +15,10 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 
 from __future__ import annotations
 
+import logging
+
 from django.contrib.auth.models import Group, User
+from django.db import DatabaseError
 from django.db.models import Q
 
 from arches.app.models.models import ResourceInstance
@@ -24,6 +27,8 @@ from arches.app.permissions.arches_default_deny import (
 )
 from arches.app.search.elasticsearch_dsl_builder import Bool
 from arches.app.search.search import SearchEngine
+
+logger = logging.getLogger(__name__)
 
 
 class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
@@ -48,6 +53,21 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
             return user_or_group.groups.all()
         return Group.objects.none()
 
+    def evaluate_rule(self, rule, evaluate, default):
+        """Run evaluate(rule), treating a rule that raises as matching nothing."""
+        try:
+            return evaluate(rule)
+        except DatabaseError:
+            raise
+        except Exception:
+            logger.exception(
+                "Inclusion rule %s (%s) could not be evaluated and is being "
+                "treated as matching nothing.",
+                rule.pk,
+                rule.name,
+            )
+            return default
+
     def get_abac_perms(
         self, user_or_group: User | Group | None, obj: ResourceInstance
     ) -> set[str]:
@@ -68,7 +88,9 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         for grant in grants:
             codenames = {permission.codename for permission in grant.permissions.all()}
             # Skip evaluating a rule that would grant nothing new.
-            if codenames - perms and grant.rule.matches_resource(obj):
+            if codenames - perms and self.evaluate_rule(
+                grant.rule, lambda r: r.matches_resource(obj), default=False
+            ):
                 perms |= codenames
         return perms
 
@@ -92,7 +114,11 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
 
         matches = Q()
         for rule in InclusionRule.objects.filter(grant_filter).distinct():
-            matches |= Q(pk__in=rule.get_matching_resources().values("pk"))
+            matching = self.evaluate_rule(
+                rule, lambda r: r.get_matching_resources(), default=None
+            )
+            if matching is not None:
+                matches |= Q(pk__in=matching.values("pk"))
         if not matches:
             return ResourceInstance.objects.none()
         return ResourceInstance.objects.filter(matches)
