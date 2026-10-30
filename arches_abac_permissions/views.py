@@ -8,8 +8,9 @@ from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
 
-from arches.app.models.models import GraphModel, Language, Node
+from arches.app.models.models import GraphModel, Language, MapLayer, MapSource, Node
 from arches.app.models.system_settings import settings
+from arches.app.utils.geo_utils import GeoUtils
 from arches.app.utils.i18n import get_localized_value
 from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches.app.views.api import APIBase
@@ -375,6 +376,49 @@ class ControlledListItemsView(SuperuserAPIView):
 
         visit(None, 0)
         return JSONResponse({"items": flattened})
+
+
+class MapConfigView(SuperuserAPIView):
+    """Basemaps and defaults for drawing a spatial rule's area."""
+
+    def get(self, request):
+        sources = {source.name: source.source for source in MapSource.objects.all()}
+        basemaps = []
+        for layer in MapLayer.objects.filter(isoverlay=False, activated=True).order_by(
+            "sortorder", "name"
+        ):
+            definitions = [
+                definition
+                for definition in layer.layerdefinitions or []
+                if isinstance(definition, dict)
+            ]
+            names = {definition.get("source") for definition in definitions}
+            basemaps.append(
+                {
+                    "id": str(layer.pk),
+                    "name": str(layer.name),
+                    "is_default": layer.addtomap,
+                    "layers": definitions,
+                    "sources": {
+                        name: sources[name] for name in names if name in sources
+                    },
+                }
+            )
+        bounds = (
+            GeoUtils().get_bounds_from_geojson(settings.DEFAULT_BOUNDS)
+            if settings.DEFAULT_BOUNDS
+            else None
+        )
+        return JSONResponse(
+            {
+                "basemaps": basemaps,
+                "bounds": list(bounds) if bounds else None,
+                "min_zoom": settings.MAP_MIN_ZOOM,
+                "max_zoom": settings.MAP_MAX_ZOOM,
+                "sprite": settings.MAPLIBRE_SPRITES,
+                "glyphs": settings.MAPLIBRE_GLYPHS,
+            }
+        )
 
 
 def serialize_group(group):
