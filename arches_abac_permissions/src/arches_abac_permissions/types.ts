@@ -1,3 +1,5 @@
+import type { MultiPolygon, Polygon } from "geojson";
+
 export type PermissionName = "read" | "update" | "delete";
 
 export interface LifecycleStateDefinition {
@@ -16,8 +18,20 @@ export interface TileNodeValueDefinition {
     language: string;
 }
 
+export type AreaGeometry = Polygon | MultiPolygon;
+
+export interface SpatialDefinition {
+    graphid: string;
+    nodeid: string;
+    // EPSG:4326
+    geometry: AreaGeometry;
+}
+
 export type RuleDefinition = Partial<
-    LifecycleStateDefinition & ResourceSetDefinition & TileNodeValueDefinition
+    LifecycleStateDefinition &
+        ResourceSetDefinition &
+        TileNodeValueDefinition &
+        SpatialDefinition
 >;
 
 export interface NodeOption {
@@ -35,6 +49,24 @@ export interface TileNode {
     false_label?: string;
     date_format?: string;
     controlled_list_id?: string | null;
+}
+
+export interface Basemap {
+    id: string;
+    name: string;
+    is_default: boolean;
+    layers: Record<string, unknown>[];
+    sources: Record<string, Record<string, unknown>>;
+}
+
+export interface MapConfig {
+    basemaps: Basemap[];
+    // [west, south, east, north]
+    bounds: [number, number, number, number] | null;
+    min_zoom: number;
+    max_zoom: number;
+    sprite: string;
+    glyphs: string;
 }
 
 export interface Language {

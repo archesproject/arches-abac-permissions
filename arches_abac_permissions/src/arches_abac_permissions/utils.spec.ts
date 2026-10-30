@@ -80,6 +80,47 @@ describe("drafts", () => {
         expect(isDraftComplete(draft)).toBe(false);
     });
 
+    it("requires a model, node and area for spatial rules", () => {
+        const draft = newDraft("spatial");
+        draft.name = "Name";
+        draft.definition = { graphid: "g", nodeid: "n" };
+        expect(isDraftComplete(draft)).toBe(false);
+        draft.definition.geometry = {
+            type: "Polygon",
+            coordinates: [
+                [
+                    [0, 0],
+                    [1, 0],
+                    [1, 1],
+                    [0, 0],
+                ],
+            ],
+        };
+        expect(isDraftComplete(draft)).toBe(true);
+    });
+
+    it("compares nested definitions ignoring key order", () => {
+        const coordinates = [
+            [
+                [0, 0],
+                [1, 1],
+                [0, 0],
+            ],
+        ];
+        expect(
+            sameDefinition(
+                { geometry: { type: "Polygon", coordinates } },
+                { geometry: { coordinates, type: "Polygon" } },
+            ),
+        ).toBe(true);
+        expect(
+            sameDefinition(
+                { geometry: { type: "Polygon", coordinates } },
+                { geometry: { type: "Polygon", coordinates: [] } },
+            ),
+        ).toBe(false);
+    });
+
     it("compares definitions ignoring key order and empty values", () => {
         expect(
             sameDefinition(

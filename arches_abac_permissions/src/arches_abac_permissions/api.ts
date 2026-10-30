@@ -6,6 +6,7 @@ import type {
     Group,
     Language,
     ListItemOption,
+    MapConfig,
     ResourceModel,
     ResourceSet,
     Rule,
@@ -83,12 +84,17 @@ export const fetchResourceSets = async () =>
         )
     ).resource_sets;
 
-export const fetchResourceModelNodes = async (graphid: string) =>
-    (
-        await request<{ nodes: TileNode[] }>(
-            arches.urls.abac_resource_model_nodes(graphid),
-        )
-    ).nodes;
+export const fetchResourceModelNodes = async (
+    graphid: string,
+    datatype?: string,
+) => {
+    const url = arches.urls.abac_resource_model_nodes(graphid);
+    const query = datatype ? `?${new URLSearchParams({ datatype })}` : "";
+    return (await request<{ nodes: TileNode[] }>(url + query)).nodes;
+};
+
+export const fetchMapConfig = () =>
+    request<MapConfig>(arches.urls.abac_map_config);
 
 export const fetchLanguages = async () =>
     (await request<{ languages: Language[] }>(arches.urls.abac_languages))

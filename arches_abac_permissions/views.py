@@ -8,8 +8,9 @@ from django.db import IntegrityError, transaction
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
 
-from arches.app.models.models import GraphModel, Language, Node
+from arches.app.models.models import GraphModel, Language, MapLayer, MapSource, Node
 from arches.app.models.system_settings import settings
+from arches.app.utils.geo_utils import GeoUtils
 from arches.app.utils.i18n import get_localized_value
 from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches.app.views.api import APIBase
@@ -19,6 +20,7 @@ from arches_abac_permissions.rule_types import (
     RULE_TYPES,
     get_rule_type_for_classname,
 )
+from arches_abac_permissions.rules.spatial_rule import GEOMETRY_DATATYPE
 from arches_abac_permissions.rules.tile_node_value_rule import get_supported_datatypes
 
 GROUP_NAME_MAX_LENGTH = 150
@@ -113,7 +115,11 @@ def parse_rule_payload(body):
     if not isinstance(raw_definition, dict):
         raise BadRequest(_("A rule definition is required."))
     definition = {
-        key: str(raw_definition[key])
+        key: (
+            raw_definition[key]
+            if key in rule_type.json_definition_keys
+            else str(raw_definition[key])
+        )
         for key in rule_type.definition_keys
         if raw_definition.get(key) is not None
     }
@@ -324,10 +330,15 @@ def serialize_node(node):
 
 class ResourceModelNodesView(SuperuserAPIView):
     def get(self, request, graph_id):
+        datatypes = get_supported_datatypes()
+        if datatype := request.GET.get("datatype"):
+            if datatype not in (*datatypes, GEOMETRY_DATATYPE):
+                raise BadRequest(_("Unsupported datatype."))
+            datatypes = (datatype,)
         nodes = Node.objects.filter(
             graph_id=graph_id,
             graph__isresource=True,
-            datatype__in=get_supported_datatypes(),
+            datatype__in=datatypes,
         )
         serialized = [serialize_node(node) for node in nodes]
         serialized.sort(key=lambda node: node["name"].lower())
@@ -374,6 +385,49 @@ class ControlledListItemsView(SuperuserAPIView):
 
         visit(None, 0)
         return JSONResponse({"items": flattened})
+
+
+class MapConfigView(SuperuserAPIView):
+    """Basemaps and defaults for drawing a spatial rule's area."""
+
+    def get(self, request):
+        sources = {source.name: source.source for source in MapSource.objects.all()}
+        basemaps = []
+        for layer in MapLayer.objects.filter(isoverlay=False, activated=True).order_by(
+            "sortorder", "name"
+        ):
+            definitions = [
+                definition
+                for definition in layer.layerdefinitions or []
+                if isinstance(definition, dict)
+            ]
+            names = {definition.get("source") for definition in definitions}
+            basemaps.append(
+                {
+                    "id": str(layer.pk),
+                    "name": str(layer.name),
+                    "is_default": layer.addtomap,
+                    "layers": definitions,
+                    "sources": {
+                        name: sources[name] for name in names if name in sources
+                    },
+                }
+            )
+        bounds = (
+            GeoUtils().get_bounds_from_geojson(settings.DEFAULT_BOUNDS)
+            if settings.DEFAULT_BOUNDS
+            else None
+        )
+        return JSONResponse(
+            {
+                "basemaps": basemaps,
+                "bounds": list(bounds) if bounds else None,
+                "min_zoom": settings.MAP_MIN_ZOOM,
+                "max_zoom": settings.MAP_MAX_ZOOM,
+                "sprite": settings.MAPLIBRE_SPRITES,
+                "glyphs": settings.MAPLIBRE_GLYPHS,
+            }
+        )
 
 
 def serialize_group(group):

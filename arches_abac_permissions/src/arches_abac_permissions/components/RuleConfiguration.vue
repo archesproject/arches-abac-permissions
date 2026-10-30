@@ -9,10 +9,12 @@ import IndexSqlDisclosure from "@/arches_abac_permissions/components/IndexSqlDis
 import RuleTypePicker from "@/arches_abac_permissions/components/RuleTypePicker.vue";
 import LifecycleStateRuleForm from "@/arches_abac_permissions/components/rule_types/LifecycleStateRuleForm.vue";
 import ResourceSetRuleForm from "@/arches_abac_permissions/components/rule_types/ResourceSetRuleForm.vue";
+import SpatialRuleForm from "@/arches_abac_permissions/components/rule_types/SpatialRuleForm.vue";
 import TileNodeValueRuleForm from "@/arches_abac_permissions/components/rule_types/TileNodeValueRuleForm.vue";
 import {
     LIFECYCLE_STATE,
     RESOURCE_SET,
+    SPATIAL,
     TILE_NODE_VALUE,
 } from "@/arches_abac_permissions/constants.ts";
 import { sameDefinition } from "@/arches_abac_permissions/utils.ts";
@@ -41,6 +43,7 @@ const RULE_TYPE_FORMS = {
     [LIFECYCLE_STATE]: LifecycleStateRuleForm,
     [RESOURCE_SET]: ResourceSetRuleForm,
     [TILE_NODE_VALUE]: TileNodeValueRuleForm,
+    [SPATIAL]: SpatialRuleForm,
 };
 
 const ruleType = computed(() =>

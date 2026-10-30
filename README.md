@@ -112,7 +112,7 @@ pip install -e arches-abac-permissions --group dev
 Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
 
 - **Rules** (left): filter, add, and delete rules.
-- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed), or a resource model, node and value for *Resource has Node Value*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
+- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed), a resource model, node and value for *Resource has Node Value*, or a resource model, geometry node and an area drawn on a map (or entered as GeoJSON) for *Resource is in Area*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. More rule types can be added in `arches_abac_permissions/rule_types.py` and `src/arches_abac_permissions/components/RuleConfiguration.vue`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
 - **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members cannot be deleted. **Save** stores the rule, its definition and all grants together.
 
 The **Group Membership** view (switch at the top) lists groups, accounts and an editor. Filter accounts by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
@@ -143,6 +143,7 @@ Things to be aware of:
 | `lifecycle_state_rule.py` | `LifecycleStateRule` | Resources of a graph that are in a given lifecycle state |
 | `resource_set_rule.py` | `ResourceSetRule` | The members of an [arches-resource-sets](https://github.com/archesproject/arches-resource-sets) resource set |
 | `tile_node_value_rule.py` | `TileNodeValueRule` | Resources of a graph with a tile whose node holds a given value |
+| `spatial_rule.py` | `SpatialRule` | Resources of a graph with a geometry in a given node that intersects an area |
 | `search_rule.py` | `SearchRule` | Not yet evaluated; stores a saved search query |
 | `queryset_rule.py` | `QuerySetRule` | Not yet evaluated |
 
@@ -288,6 +289,26 @@ Things to be aware of:
 - Concept and concept-list nodes, and other datatypes, aren't supported.
 - **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
 
+## Creating a spatial rule
+
+A spatial rule grants permissions on every resource of a resource model with a geometry, in a given geometry node, that intersects an area, for example every **Heritage Asset** whose *Location* is partly inside a district. It reads Arches' `geojson_geometries` table, so editing the geometry changes access straight away.
+
+Create it in the plugin (*Resource is in Area*), where you draw the area on the project's basemaps or paste GeoJSON under **Edit as GeoJSON**, or in the admin with modulename `spatial_rule.py`, classname `SpatialRule` and definition:
+
+```json
+{
+    "graphid": "<id of the resource model>",
+    "nodeid": "<id of a geojson-feature-collection node of that model>",
+    "geometry": {"type": "Polygon", "coordinates": [[[-0.2, 51.4], [0.1, 51.4], [0.1, 51.6], [-0.2, 51.4]]]}
+}
+```
+
+Things to be aware of:
+
+- **The area is a GeoJSON `Polygon` or `MultiPolygon` in longitude/latitude (WGS 84).** Any `crs` is ignored. It may have at most 10,000 vertices, and overlapping polygons are merged.
+- A resource matches when any of its geometries in the node touches or overlaps the area.
+- **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
+
 ## Indexes for rules
 
 Rules are evaluated with SQL whenever permissions are checked, so a large database may need an index for them. The plugin shows the SQL for a saved rule under **Index SQL**, and `InclusionRule.get_index_sql_for_rule()` returns it. Run it against the Arches database with `psql`, outside a transaction (`CREATE INDEX CONCURRENTLY` can't run in one).
@@ -295,6 +316,7 @@ Rules are evaluated with SQL whenever permissions are checked, so a large databa
 - *Resource has Lifecycle State*: one index on `resource_instances (graphid, resource_instance_lifecycle_state_id)`, shared by every such rule.
 - *Resource is in Resource Set*: none; the set membership table is already indexed.
 - *Resource has Node Value*: a partial GIN index on the node's value in `tiles`, one per node. Rules on the same node share it.
+- *Resource is in Area*: a partial GiST index on `geojson_geometries.geom` for the node, one per node. Rules on the same node share it.
 
 Custom rule classes can return their own SQL from a `get_index_sql(cls, inclusion_rule)` classmethod; the default returns `None`.
 
@@ -355,7 +377,7 @@ class MyRule(InclusionRule):
 
 - Rule classes are **proxy models** of `InclusionRule`, so they share its table and add no columns.
 - Set `app_label` to your project's app label, or leave it out. **Don't copy `app_label = "arches_abac_permissions"`** from the built-in rules: if you do, `makemigrations` will try to write your rule's migration into this package.
-- **Give the module a name the built-in rules don't use** (not `lifecycle_state_rule`, `resource_set_rule`, `tile_node_value_rule`, `search_rule` or `queryset_rule`). Lookup uses the first match in `INSTALLED_APPS` order, so a duplicate name could load the wrong class.
+- **Give the module a name the built-in rules don't use** (not `lifecycle_state_rule`, `resource_set_rule`, `tile_node_value_rule`, `spatial_rule`, `search_rule` or `queryset_rule`). Lookup uses the first match in `INSTALLED_APPS` order, so a duplicate name could load the wrong class.
 
 See `arches_abac_permissions/rules/lifecycle_state_rule.py` for a complete example.
 
