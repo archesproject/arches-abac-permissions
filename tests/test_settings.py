@@ -59,6 +59,12 @@ CACHES = {
         "BACKEND": "django.core.cache.backends.dummy.DummyCache",
         "LOCATION": "user_permission_cache",
     },
+    "querysets_concepts": {
+        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+    },
+    "querysets_resource_instances": {
+        "BACKEND": "django.core.cache.backends.dummy.DummyCache",
+    },
 }
 
 LOGGING["loggers"]["django.request"]["level"] = "ERROR"
