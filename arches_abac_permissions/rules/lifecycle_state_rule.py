@@ -52,6 +52,14 @@ class LifecycleStateRule(InclusionRule):
     def validate_definition(cls, inclusion_rule):
         cls.parse_definition(inclusion_rule.definition)
 
+    @classmethod
+    def get_index_sql(cls, inclusion_rule):
+        # One index serves every lifecycle state rule.
+        return (
+            "CREATE INDEX CONCURRENTLY IF NOT EXISTS abac_resource_graph_lifecycle_state\n"
+            "    ON resource_instances (graphid, resource_instance_lifecycle_state_id);"
+        )
+
     @staticmethod
     def parse_definition(definition):
         graphid = definition.get("graphid")

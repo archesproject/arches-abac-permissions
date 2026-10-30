@@ -5,17 +5,22 @@ import { useGettext } from "vue3-gettext";
 import InputText from "openvue/inputtext";
 import Textarea from "openvue/textarea";
 
+import IndexSqlDisclosure from "@/arches_abac_permissions/components/IndexSqlDisclosure.vue";
 import RuleTypePicker from "@/arches_abac_permissions/components/RuleTypePicker.vue";
 import LifecycleStateRuleForm from "@/arches_abac_permissions/components/rule_types/LifecycleStateRuleForm.vue";
 import ResourceSetRuleForm from "@/arches_abac_permissions/components/rule_types/ResourceSetRuleForm.vue";
+import TileNodeValueRuleForm from "@/arches_abac_permissions/components/rule_types/TileNodeValueRuleForm.vue";
 import {
     LIFECYCLE_STATE,
     RESOURCE_SET,
+    TILE_NODE_VALUE,
 } from "@/arches_abac_permissions/constants.ts";
+import { sameDefinition } from "@/arches_abac_permissions/utils.ts";
 
 import type {
     ResourceModel,
     ResourceSet,
+    Rule,
     RuleDraft,
     RuleTypeInfo,
 } from "@/arches_abac_permissions/types";
@@ -26,6 +31,7 @@ const props = defineProps<{
     ruleTypes: RuleTypeInfo[];
     resourceModels: ResourceModel[];
     resourceSets: ResourceSet[];
+    savedRule: Rule | null;
 }>();
 const draft = defineModel<RuleDraft | null>({ required: true });
 const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
@@ -34,6 +40,7 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 const RULE_TYPE_FORMS = {
     [LIFECYCLE_STATE]: LifecycleStateRuleForm,
     [RESOURCE_SET]: ResourceSetRuleForm,
+    [TILE_NODE_VALUE]: TileNodeValueRuleForm,
 };
 
 const ruleType = computed(() =>
@@ -50,6 +57,12 @@ const formProps = computed(() =>
         ? { resourceSets: props.resourceSets }
         : { resourceModels: props.resourceModels },
 );
+const isIndexSqlStale = computed(() => {
+    if (!props.savedRule || !draft.value) {
+        return false;
+    }
+    return !sameDefinition(props.savedRule.definition, draft.value.definition);
+});
 const heading = computed(() => {
     if (!draft.value) {
         return "";
@@ -116,6 +129,10 @@ const heading = computed(() => {
                     v-if="form"
                     v-model="draft.definition"
                     v-bind="formProps"
+                />
+                <IndexSqlDisclosure
+                    :index-sql="savedRule ? savedRule.index_sql : undefined"
+                    :is-stale="isIndexSqlStale"
                 />
             </form>
         </div>

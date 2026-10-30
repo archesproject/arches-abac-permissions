@@ -9,9 +9,44 @@ export interface ResourceSetDefinition {
     resource_set_id: string;
 }
 
+export interface TileNodeValueDefinition {
+    graphid: string;
+    nodeid: string;
+    value: string;
+    language: string;
+}
+
 export type RuleDefinition = Partial<
-    LifecycleStateDefinition & ResourceSetDefinition
+    LifecycleStateDefinition & ResourceSetDefinition & TileNodeValueDefinition
 >;
+
+export interface NodeOption {
+    id: string;
+    label: string;
+}
+
+export interface TileNode {
+    nodeid: string;
+    name: string;
+    alias: string;
+    datatype: string;
+    options?: NodeOption[];
+    true_label?: string;
+    false_label?: string;
+    date_format?: string;
+    controlled_list_id?: string | null;
+}
+
+export interface Language {
+    code: string;
+    name: string;
+}
+
+export interface ListItemOption {
+    id: string;
+    label: string;
+    depth: number;
+}
 
 export interface ResourceSet {
     id: string;
@@ -38,6 +73,8 @@ export interface Rule {
     rule_type: string | null;
     definition: RuleDefinition;
     group_permissions: GroupPermission[];
+    // SQL for an index that speeds up evaluating the rule, if one helps.
+    index_sql: string | null;
 }
 
 export interface Group {

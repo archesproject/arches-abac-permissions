@@ -23,6 +23,12 @@ class ResourceSetRule(InclusionRule):
         return False
 
     @classmethod
+    def get_index_sql(cls, inclusion_rule):
+        # resource_set_member's unique (resource_set_id, resource_instance_id)
+        # constraint already indexes membership lookups.
+        return None
+
+    @classmethod
     def get_matching_resources(cls, inclusion_rule):
         set_id = cls.parse_definition(inclusion_rule.definition)
         members = ResourceSetMember.objects.filter(resource_set_id=set_id)
