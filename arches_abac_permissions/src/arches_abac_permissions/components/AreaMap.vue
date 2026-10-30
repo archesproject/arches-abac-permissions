@@ -66,24 +66,15 @@ let draw: any = null;
 let syncedArea = "";
 let isLoaded = false;
 
-function layerId(basemapIdValue: string, id: unknown) {
-    return `${basemapIdValue}/${id}`;
-}
+const DRAW_SOURCES = ["mapbox-gl-draw-cold", "mapbox-gl-draw-hot"];
 
-function buildStyle(): StyleSpecification {
-    const sources = Object.assign(
-        {},
-        ...props.config.basemaps.map((basemap) => basemap.sources),
-    );
-    const layers = props.config.basemaps.flatMap((basemap) =>
-        basemap.layers.map((layer) => ({
-            ...layer,
-            id: layerId(basemap.id, layer.id),
-            layout: {
-                ...(layer.layout as object | undefined),
-                visibility: basemap.id === basemapId.value ? "visible" : "none",
-            },
-        })),
+// Only the selected basemap is styled, as in core: one invalid layer would
+// stop the whole style loading. Layers without their source are dropped.
+function buildStyle(selected: string | undefined): StyleSpecification {
+    const basemap = props.config.basemaps.find(({ id }) => id === selected);
+    const sources = basemap?.sources ?? {};
+    const layers = (basemap?.layers ?? []).filter(
+        (layer) => !layer.source || (layer.source as string) in sources,
     );
     return {
         version: 8,
@@ -163,29 +154,37 @@ watch(area, (geometry) => {
     }
 });
 
+// Carries Draw's sources and layers over, since setStyle would drop them.
 watch(basemapId, (selected) => {
-    if (!map) {
-        return;
-    }
-    for (const basemap of props.config.basemaps) {
-        for (const layer of basemap.layers) {
-            const id = layerId(basemap.id, layer.id);
-            if (map.getLayer(id)) {
-                map.setLayoutProperty(
-                    id,
-                    "visibility",
-                    basemap.id === selected ? "visible" : "none",
-                );
-            }
-        }
-    }
+    map?.setStyle(buildStyle(selected), {
+        diff: false,
+        transformStyle: (previous, next) => ({
+            ...next,
+            sources: {
+                ...next.sources,
+                ...Object.fromEntries(
+                    Object.entries(previous?.sources ?? {}).filter(([id]) =>
+                        DRAW_SOURCES.includes(id),
+                    ),
+                ),
+            },
+            layers: [
+                ...next.layers,
+                ...(previous?.layers ?? []).filter(
+                    (layer) =>
+                        "source" in layer &&
+                        DRAW_SOURCES.includes(layer.source as string),
+                ),
+            ],
+        }),
+    });
 });
 
 onMounted(() => {
     const bounds = boundsOf(area.value) ?? props.config.bounds ?? undefined;
     map = new MapLibreMap({
         container: container.value!,
-        style: buildStyle(),
+        style: buildStyle(basemapId.value),
         bounds,
         fitBoundsOptions: { padding: 40, maxZoom: 16 },
         minZoom: props.config.min_zoom,
