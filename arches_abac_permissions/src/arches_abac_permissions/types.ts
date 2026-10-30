@@ -23,6 +23,8 @@ export interface Rule {
     rule_type: string | null;
     definition: RuleDefinition;
     group_permissions: GroupPermission[];
+    // SQL for an index that speeds up evaluating the rule, if one helps.
+    index_sql: string | null;
 }
 
 export interface Group {

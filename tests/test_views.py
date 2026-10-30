@@ -60,6 +60,9 @@ class AccessTests(ApiTestCase):
             reverse("abac_rule", args=[rule.pk]),
             reverse("abac_rule_types"),
             reverse("abac_resource_models"),
+            reverse("abac_resource_model_nodes", args=[self.graph.pk]),
+            reverse("abac_languages"),
+            reverse("abac_controlled_list_items", args=[uuid.uuid4()]),
             reverse("abac_groups"),
             reverse("abac_group", args=[self.group.pk]),
             reverse("abac_users"),
@@ -184,6 +187,7 @@ class ReferenceDataApiTests(ApiTestCase):
         expected = ["lifecycle_state"]
         if apps.is_installed("arches_resource_sets"):
             expected.append("resource_set")
+        expected.append("tile_node_value")
         self.assertEqual([t["key"] for t in types], expected)
 
     def test_resource_sets(self):

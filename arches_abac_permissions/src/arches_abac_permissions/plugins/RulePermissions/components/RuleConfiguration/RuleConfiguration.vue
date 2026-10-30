@@ -5,15 +5,22 @@ import { useGettext } from "vue3-gettext";
 import InputText from "openvue/inputtext";
 import Textarea from "openvue/textarea";
 
+import IndexSqlDisclosure from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/components/IndexSqlDisclosure/IndexSqlDisclosure.vue";
 import RuleTypePicker from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/components/RuleTypePicker/RuleTypePicker.vue";
 import { getRuleTypeForKey } from "@/arches_abac_permissions/rule-types/index.ts";
+import { sameDefinition } from "@/arches_abac_permissions/utils.ts";
 
-import type { RuleDraft, RuleTypeInfo } from "@/arches_abac_permissions/types";
+import type {
+    Rule,
+    RuleDraft,
+    RuleTypeInfo,
+} from "@/arches_abac_permissions/types";
 
 const { $gettext } = useGettext();
 
 const props = defineProps<{
     ruleTypes: RuleTypeInfo[];
+    savedRule: Rule | null;
 }>();
 const draft = defineModel<RuleDraft | null>({ required: true });
 const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
@@ -22,6 +29,12 @@ const ruleType = computed(() =>
     props.ruleTypes.find((type) => type.key === draft.value?.rule_type),
 );
 const form = computed(() => getRuleTypeForKey(draft.value?.rule_type)?.form);
+const isIndexSqlStale = computed(() => {
+    if (!props.savedRule || !draft.value) {
+        return false;
+    }
+    return !sameDefinition(props.savedRule.definition, draft.value.definition);
+});
 const heading = computed(() => {
     if (!draft.value) {
         return "";
@@ -87,6 +100,10 @@ const heading = computed(() => {
                     :is="form"
                     v-if="form"
                     v-model="draft.definition"
+                />
+                <IndexSqlDisclosure
+                    :index-sql="savedRule ? savedRule.index_sql : undefined"
+                    :is-stale="isIndexSqlStale"
                 />
             </form>
         </div>
