@@ -13,6 +13,8 @@ class RuleType:
     description: str
     icon: str
     definition_keys: tuple[str, ...]
+    # Keys stored as JSON rather than coerced to strings.
+    json_definition_keys: tuple[str, ...] = ()
     required_app: str | None = None
 
     @property
@@ -52,6 +54,16 @@ RULE_TYPES = {
         description=_("Matches resources with a tile whose node holds a value"),
         icon="pi pi-tag",
         definition_keys=("graphid", "nodeid", "value", "language"),
+    ),
+    "spatial": RuleType(
+        key="spatial",
+        modulename="spatial_rule.py",
+        classname="SpatialRule",
+        label=_("Resource is in Area"),
+        description=_("Matches resources with a geometry that intersects an area"),
+        icon="pi pi-map",
+        definition_keys=("graphid", "nodeid", "geometry"),
+        json_definition_keys=("geometry",),
     ),
 }
 

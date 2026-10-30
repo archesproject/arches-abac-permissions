@@ -1,6 +1,7 @@
 import {
     PERMISSION_NAMES,
     RESOURCE_SET,
+    SPATIAL,
     TILE_NODE_VALUE,
 } from "@/arches_abac_permissions/constants.ts";
 
@@ -152,20 +153,33 @@ export function isDraftComplete(draft: RuleDraft): boolean {
                 draft.definition.value?.trim(),
         );
     }
+    if (draft.rule_type === SPATIAL) {
+        return Boolean(
+            draft.definition.graphid &&
+                draft.definition.nodeid &&
+                draft.definition.geometry,
+        );
+    }
     return Boolean(
         draft.definition.graphid && draft.definition.lifecycle_state_id,
     );
 }
 
-// Compares definitions ignoring key order and empty values.
+// Compares definitions ignoring key order (at any depth) and empty values.
 export function sameDefinition(a: RuleDefinition, b: RuleDefinition): boolean {
-    const canonical = (definition: RuleDefinition) =>
-        JSON.stringify(
-            Object.entries(definition)
-                .filter(([, value]) => value !== undefined && value !== "")
-                .sort(([x], [y]) => x.localeCompare(y)),
-        );
-    return canonical(a) === canonical(b);
+    const canonical = (value: unknown): unknown => {
+        if (Array.isArray(value)) {
+            return value.map(canonical);
+        }
+        if (value && typeof value === "object") {
+            return Object.entries(value)
+                .filter(([, item]) => item !== undefined && item !== "")
+                .sort(([x], [y]) => x.localeCompare(y))
+                .map(([key, item]) => [key, canonical(item)]);
+        }
+        return value;
+    };
+    return JSON.stringify(canonical(a)) === JSON.stringify(canonical(b));
 }
 
 export function accountDisplayName(account: Account): string {

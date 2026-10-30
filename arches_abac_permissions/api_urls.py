@@ -9,6 +9,7 @@ from arches_abac_permissions.views import (
     GroupsView,
     GroupView,
     LanguagesView,
+    MapConfigView,
     ResourceModelNodesView,
     ResourceModelsView,
     ResourceSetsView,
@@ -32,6 +33,7 @@ urlpatterns = [
         name="abac_resource_model_nodes",
     ),
     path("api/abac/languages", LanguagesView.as_view(), name="abac_languages"),
+    path("api/abac/map_config", MapConfigView.as_view(), name="abac_map_config"),
     path(
         "api/abac/controlled_lists/<uuid:list_id>/items",
         ControlledListItemsView.as_view(),
