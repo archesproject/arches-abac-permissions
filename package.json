@@ -18,7 +18,7 @@
         "vitest": "vitest --run --coverage"
     },
     "dependencies": {
-        "arches": "github:archesproject/arches#v8.2.0-alpha.13"
+        "arches": "github:archesproject/arches#2024.09.27"
     },
     "nodeModulesPaths": {},
     "overrides": {
