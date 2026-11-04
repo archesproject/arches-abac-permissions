@@ -276,13 +276,9 @@ class ResourceSetsView(SuperuserAPIView):
         from arches_resource_sets.models import ResourceSet
 
         resource_sets = [
-            {
-                "id": str(resource_set.pk),
-                "name": str(resource_set.description or "") or str(resource_set.pk),
-            }
-            for resource_set in ResourceSet.objects.all()
+            {"id": str(pk)}
+            for pk in ResourceSet.objects.order_by("pk").values_list("pk", flat=True)
         ]
-        resource_sets.sort(key=lambda resource_set: resource_set["name"].lower())
         return JSONResponse({"resource_sets": resource_sets})
 
 

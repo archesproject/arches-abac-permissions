@@ -55,7 +55,7 @@ async function loadResourceSets(): Promise<void> {
             :model-value="definition.resource_set_id"
             :options="resourceSets"
             :loading="isLoading"
-            option-label="name"
+            option-label="id"
             option-value="id"
             :filter="true"
             :placeholder="$gettext('Select a resource set…')"

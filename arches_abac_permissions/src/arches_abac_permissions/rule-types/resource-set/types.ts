@@ -4,5 +4,4 @@ export interface ResourceSetDefinition {
 
 export interface ResourceSet {
     id: string;
-    name: string;
 }
