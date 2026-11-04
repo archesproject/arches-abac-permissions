@@ -5,8 +5,8 @@ import { useGettext } from "vue3-gettext";
 import InputText from "openvue/inputtext";
 import Textarea from "openvue/textarea";
 
-import RuleTypePicker from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/components/RuleTypePicker.vue";
-import { getRuleTypeForKey } from "@/arches_abac_permissions/rule_types/index.ts";
+import RuleTypePicker from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/components/RuleTypePicker/RuleTypePicker.vue";
+import { getRuleTypeForKey } from "@/arches_abac_permissions/rule-types/index.ts";
 
 import type { RuleDraft, RuleTypeInfo } from "@/arches_abac_permissions/types";
 
@@ -67,7 +67,7 @@ const heading = computed(() => {
                         id="abac-rule-name"
                         v-model="draft.name"
                         maxlength="255"
-                        required
+                        :required="true"
                         :placeholder="$gettext('Enter rule name…')"
                     />
                 </div>
@@ -110,6 +110,6 @@ const heading = computed(() => {
     margin: 0;
     font-size: 1.8rem;
     font-weight: 500;
-    color: var(--abac-text-primary);
+    color: var(--p-abac-text-primary);
 }
 </style>

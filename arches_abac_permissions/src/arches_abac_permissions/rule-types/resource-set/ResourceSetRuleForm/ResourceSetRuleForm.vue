@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { onMounted, ref } from "vue";
+import { ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Select from "openvue/select";
@@ -9,12 +9,12 @@ import {
     DEFAULT_ERROR_TOAST_LIFE,
     ERROR,
 } from "@/arches_abac_permissions/constants.ts";
-import { fetchResourceSets } from "@/arches_abac_permissions/rule_types/resource_set/api.ts";
+import { fetchResourceSets } from "@/arches_abac_permissions/rule-types/resource-set/api.ts";
 
 import type {
     ResourceSet,
     ResourceSetDefinition,
-} from "@/arches_abac_permissions/rule_types/resource_set/types";
+} from "@/arches_abac_permissions/rule-types/resource-set/types";
 
 const { $gettext } = useGettext();
 const toast = useToast();
@@ -25,7 +25,13 @@ const definition = defineModel<Partial<ResourceSetDefinition>>({
 const resourceSets = ref<ResourceSet[]>([]);
 const isLoading = ref(true);
 
-onMounted(async () => {
+watchEffect(loadResourceSets);
+
+function onSetChange(setId: string | null): void {
+    definition.value = { resource_set_id: setId ?? undefined };
+}
+
+async function loadResourceSets(): Promise<void> {
     try {
         resourceSets.value = await fetchResourceSets();
     } catch (error) {
@@ -38,10 +44,6 @@ onMounted(async () => {
     } finally {
         isLoading.value = false;
     }
-});
-
-function onSetChange(setId: string | null) {
-    definition.value = { resource_set_id: setId ?? undefined };
 }
 </script>
 
@@ -55,7 +57,7 @@ function onSetChange(setId: string | null) {
             :loading="isLoading"
             option-label="name"
             option-value="id"
-            filter
+            :filter="true"
             :placeholder="$gettext('Select a resource set…')"
             @update:model-value="onSetChange"
         />

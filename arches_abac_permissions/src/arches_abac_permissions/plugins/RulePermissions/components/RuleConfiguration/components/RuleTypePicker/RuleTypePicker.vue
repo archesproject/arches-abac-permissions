@@ -55,9 +55,10 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 }
 
 .prompt {
-    margin: 0 0 1rem;
+    margin-block: 0 1rem;
+    margin-inline: 0;
     font-size: 1.6rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .type-list {
@@ -70,17 +71,18 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 }
 
 .type-card {
-    width: 100%;
-    height: 100%;
+    inline-size: 100%;
+    block-size: 100%;
     display: flex;
     flex-direction: column;
     align-items: center;
     gap: 1.4rem;
-    padding: 4rem 2.2rem 6rem;
-    border: 1px solid var(--abac-border);
+    padding-block: 4rem 6rem;
+    padding-inline: 2.2rem;
+    border: 0.1rem solid var(--p-abac-border);
     border-radius: 1rem;
-    background: var(--abac-surface-card);
-    color: var(--abac-text-primary);
+    background: var(--p-abac-surface-card);
+    color: var(--p-abac-text-primary);
     font: inherit;
     text-align: center;
     cursor: pointer;
@@ -90,25 +92,25 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 }
 
 .type-card:hover {
-    border-color: var(--abac-accent);
-    background: var(--abac-row-hover);
+    border-color: var(--p-abac-accent);
+    background: var(--p-abac-row-hover);
 }
 
 .type-card:focus-visible {
-    outline: 2px solid var(--abac-accent);
-    outline-offset: 2px;
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: 0.2rem;
 }
 
 .type-icon {
-    width: 4.8rem;
-    height: 4.8rem;
+    inline-size: 4.8rem;
+    block-size: 4.8rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 1px solid var(--abac-border);
+    border: 0.1rem solid var(--p-abac-border);
     border-radius: 1rem;
-    background: var(--abac-surface-bg);
-    color: var(--abac-accent);
+    background: var(--p-abac-surface-bg);
+    color: var(--p-abac-accent);
     font-size: 2rem;
 }
 
@@ -124,7 +126,7 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 
 .type-kicker {
     font-size: 1.6rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .type-title {
@@ -135,6 +137,6 @@ const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 .type-description {
     font-size: 1.25rem;
     line-height: 1.55;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 </style>

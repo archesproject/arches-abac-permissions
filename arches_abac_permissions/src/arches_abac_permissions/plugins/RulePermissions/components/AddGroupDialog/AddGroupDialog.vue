@@ -27,7 +27,7 @@ watch(visible, (isVisible) => {
     }
 });
 
-async function submit() {
+async function submit(): Promise<void> {
     if (!name.value.trim() || isSaving.value) {
         return;
     }
@@ -48,7 +48,7 @@ async function submit() {
 <template>
     <Dialog
         v-model:visible="visible"
-        modal
+        :modal="true"
         :draggable="false"
         :header="$gettext('Add Group')"
         class="abac-add-group-dialog"
@@ -64,7 +64,7 @@ async function submit() {
                 id="abac-new-group-name"
                 v-model="name"
                 maxlength="150"
-                autofocus
+                :autofocus="true"
                 :invalid="Boolean(error)"
                 :aria-describedby="error ? 'abac-new-group-error' : undefined"
             />
@@ -97,7 +97,7 @@ async function submit() {
 <style>
 /* Unscoped: Dialog is teleported out of this component. */
 .abac-add-group-dialog {
-    width: 40rem;
+    inline-size: 40rem;
 }
 </style>
 
@@ -116,6 +116,6 @@ async function submit() {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-    margin-top: 0.5rem;
+    margin-block-start: 0.5rem;
 }
 </style>

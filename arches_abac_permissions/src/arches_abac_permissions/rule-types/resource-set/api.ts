@@ -2,7 +2,7 @@ import arches from "arches";
 
 import { request } from "@/arches_abac_permissions/api.ts";
 
-import type { ResourceSet } from "@/arches_abac_permissions/rule_types/resource_set/types";
+import type { ResourceSet } from "@/arches_abac_permissions/rule-types/resource-set/types";
 
 export const fetchResourceSets = async () =>
     (

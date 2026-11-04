@@ -1,6 +1,6 @@
 export type PermissionName = "read" | "update" | "delete";
 
-// Shape is owned by each rule type (see rule_types/).
+// Shape is owned by each rule type (see rule-types/).
 export type RuleDefinition = Record<string, unknown>;
 
 export interface RuleTypeInfo {

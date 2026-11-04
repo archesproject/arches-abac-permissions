@@ -55,7 +55,7 @@ watch(groupId, () => {
     accountIds.value = accountIds.value.filter((id) => allowed.has(id));
 });
 
-async function submit() {
+async function submit(): Promise<void> {
     if (groupId.value === null || !accountIds.value.length || isSaving.value) {
         return;
     }
@@ -80,7 +80,7 @@ async function submit() {
 <template>
     <Dialog
         v-model:visible="visible"
-        modal
+        :modal="true"
         :draggable="false"
         :header="$gettext('Add Accounts to Group')"
         class="abac-add-accounts-dialog"
@@ -96,7 +96,7 @@ async function submit() {
                 :options="groups"
                 option-label="name"
                 option-value="id"
-                filter
+                :filter="true"
                 :placeholder="$gettext('Select a group…')"
             />
             <label for="abac-add-accounts-users">{{
@@ -109,7 +109,7 @@ async function submit() {
                 option-label="label"
                 option-value="id"
                 display="chip"
-                filter
+                :filter="true"
                 :disabled="groupId === null"
                 :placeholder="$gettext('Select accounts…')"
                 :empty-message="$gettext('Every account is already a member')"
@@ -142,7 +142,7 @@ async function submit() {
 <style>
 /* Unscoped: Dialog is teleported out of this component. */
 .abac-add-accounts-dialog {
-    width: 48rem;
+    inline-size: 48rem;
 }
 </style>
 
@@ -162,6 +162,6 @@ async function submit() {
     display: flex;
     justify-content: flex-end;
     gap: 0.5rem;
-    margin-top: 0.5rem;
+    margin-block-start: 0.5rem;
 }
 </style>

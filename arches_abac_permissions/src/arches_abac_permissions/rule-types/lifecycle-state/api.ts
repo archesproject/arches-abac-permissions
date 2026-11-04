@@ -2,7 +2,7 @@ import arches from "arches";
 
 import { request } from "@/arches_abac_permissions/api.ts";
 
-import type { ResourceModel } from "@/arches_abac_permissions/rule_types/lifecycle_state/types";
+import type { ResourceModel } from "@/arches_abac_permissions/rule-types/lifecycle-state/types";
 
 export const fetchResourceModels = async () =>
     (

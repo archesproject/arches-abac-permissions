@@ -8,7 +8,7 @@ import type {
     RuleTypeInfo,
 } from "@/arches_abac_permissions/types";
 
-function getToken() {
+function getToken(): string {
     const token = Cookies.get("csrftoken");
     if (!token) {
         throw new Error("Missing csrftoken");

@@ -35,7 +35,7 @@ const emit = defineEmits<{
     (e: "delete-group", group: Group): void;
 }>();
 
-function permissionLabel(permission: PermissionName) {
+function permissionLabel(permission: PermissionName): string {
     return {
         read: $gettext("Read"),
         update: $gettext("Update"),
@@ -43,7 +43,7 @@ function permissionLabel(permission: PermissionName) {
     }[permission];
 }
 
-function allGranted(permission: PermissionName) {
+function allGranted(permission: PermissionName): boolean {
     const current = draft.value;
     return (
         !!current &&
@@ -54,7 +54,7 @@ function allGranted(permission: PermissionName) {
     );
 }
 
-function toggleAll(permission: PermissionName) {
+function toggleAll(permission: PermissionName): void {
     if (draft.value) {
         setPermissionForAllGroups(
             draft.value,
@@ -65,11 +65,11 @@ function toggleAll(permission: PermissionName) {
     }
 }
 
-function hasAny(groupId: number) {
+function hasAny(groupId: number): boolean {
     return (draft.value?.grants[groupId] ?? []).length > 0;
 }
 
-function toggleGroup(groupId: number) {
+function toggleGroup(groupId: number): void {
     if (draft.value) {
         setGroupPermissions(
             draft.value,
@@ -250,7 +250,7 @@ function toggleGroup(groupId: number) {
                                 class="check-cell"
                             >
                                 <Checkbox
-                                    binary
+                                    :binary="true"
                                     :model-value="
                                         hasPermission(
                                             draft,
@@ -312,14 +312,14 @@ function toggleGroup(groupId: number) {
     display: flex;
     align-items: center;
     gap: 0.5rem;
-    margin-right: 0.4rem;
+    margin-inline-end: 0.4rem;
     font-size: 1.25rem;
     font-weight: 500;
-    color: var(--abac-text-primary);
+    color: var(--p-abac-text-primary);
 }
 
 .toolbar-actions {
-    margin-left: auto;
+    margin-inline-start: auto;
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -332,7 +332,7 @@ function toggleGroup(groupId: number) {
 }
 
 .grants {
-    width: 100%;
+    inline-size: 100%;
     border-collapse: collapse;
     font-size: 1.25rem;
 }
@@ -340,33 +340,33 @@ function toggleGroup(groupId: number) {
 .grants th,
 .grants td {
     padding: 0.7rem 0;
-    border-bottom: 1px solid var(--abac-border);
+    border-block-end: 0.1rem solid var(--p-abac-border);
     text-align: center;
     vertical-align: middle;
 }
 
 .grants thead th {
     position: sticky;
-    top: 0;
+    inset-block-start: 0;
     z-index: 1;
-    background: var(--abac-surface-bg);
+    background: var(--p-abac-surface-bg);
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .grants tbody tr {
-    background: var(--abac-surface-card);
-    color: var(--abac-text-primary);
+    background: var(--p-abac-surface-card);
+    color: var(--p-abac-text-primary);
 }
 
 .grants tbody tr:hover {
-    background: var(--abac-row-hover);
+    background: var(--p-abac-row-hover);
 }
 
 .grants .name-cell {
-    padding-left: 1.2rem;
-    text-align: left;
+    padding-inline-start: 1.2rem;
+    text-align: start;
 }
 
 .grants tbody .name-cell {
@@ -374,27 +374,27 @@ function toggleGroup(groupId: number) {
 }
 
 .check-cell {
-    width: 7.6rem;
+    inline-size: 7.6rem;
 }
 
 .action-cell {
-    width: 9rem;
-    padding-right: 1.2rem;
+    inline-size: 9rem;
+    padding-inline-end: 1.2rem;
 }
 
 .grants tbody .action-cell {
-    text-align: right;
+    text-align: end;
 }
 
 .group-name {
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    min-width: 0;
+    min-inline-size: 0;
 }
 
 .group-label {
-    min-width: 0;
+    min-inline-size: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -409,7 +409,7 @@ function toggleGroup(groupId: number) {
     flex-direction: column;
     align-items: center;
     gap: 0.1rem;
-    color: var(--abac-accent);
+    color: var(--p-abac-accent);
     font: inherit;
     font-size: 1.2rem;
     font-weight: 600;
@@ -418,18 +418,18 @@ function toggleGroup(groupId: number) {
 }
 
 .grant-button:hover {
-    color: var(--abac-brand-light);
+    color: var(--p-abac-brand-light);
 }
 
 .grant-button:disabled {
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
     cursor: default;
     text-decoration: none;
 }
 
 .grant-button:focus-visible {
-    outline: 2px solid var(--abac-accent);
-    outline-offset: 2px;
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: 0.2rem;
 }
 
 .grants :deep(.add-group.p-button) {
@@ -448,8 +448,8 @@ function toggleGroup(groupId: number) {
 
 .sr-only {
     position: absolute;
-    width: 1px;
-    height: 1px;
+    inline-size: 0.1rem;
+    block-size: 0.1rem;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;

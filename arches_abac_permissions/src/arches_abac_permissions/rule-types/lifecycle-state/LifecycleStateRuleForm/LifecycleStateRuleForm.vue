@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Select from "openvue/select";
@@ -9,12 +9,12 @@ import {
     DEFAULT_ERROR_TOAST_LIFE,
     ERROR,
 } from "@/arches_abac_permissions/constants.ts";
-import { fetchResourceModels } from "@/arches_abac_permissions/rule_types/lifecycle_state/api.ts";
+import { fetchResourceModels } from "@/arches_abac_permissions/rule-types/lifecycle-state/api.ts";
 
 import type {
     LifecycleStateDefinition,
     ResourceModel,
-} from "@/arches_abac_permissions/rule_types/lifecycle_state/types";
+} from "@/arches_abac_permissions/rule-types/lifecycle-state/types";
 
 const { $gettext } = useGettext();
 const toast = useToast();
@@ -32,7 +32,21 @@ const lifecycleStates = computed(
         )?.lifecycle_states ?? [],
 );
 
-onMounted(async () => {
+watchEffect(loadResourceModels);
+
+function onModelChange(graphid: string | null): void {
+    // States belong to a model's lifecycle, so a new model resets the state.
+    definition.value = { graphid: graphid ?? undefined };
+}
+
+function onStateChange(stateId: string | null): void {
+    definition.value = {
+        ...definition.value,
+        lifecycle_state_id: stateId ?? undefined,
+    };
+}
+
+async function loadResourceModels(): Promise<void> {
     try {
         resourceModels.value = await fetchResourceModels();
     } catch (error) {
@@ -45,18 +59,6 @@ onMounted(async () => {
     } finally {
         isLoading.value = false;
     }
-});
-
-function onModelChange(graphid: string | null) {
-    // States belong to a model's lifecycle, so a new model resets the state.
-    definition.value = { graphid: graphid ?? undefined };
-}
-
-function onStateChange(stateId: string | null) {
-    definition.value = {
-        ...definition.value,
-        lifecycle_state_id: stateId ?? undefined,
-    };
 }
 </script>
 
@@ -72,7 +74,7 @@ function onStateChange(stateId: string | null) {
             :loading="isLoading"
             option-label="name"
             option-value="graphid"
-            filter
+            :filter="true"
             :placeholder="$gettext('Select a resource model…')"
             @update:model-value="onModelChange"
         />

@@ -1,14 +1,14 @@
 import { defineAsyncComponent } from "vue";
 
-import type { LifecycleStateDefinition } from "@/arches_abac_permissions/rule_types/lifecycle_state/types";
-import type { RuleTypeModule } from "@/arches_abac_permissions/rule_types/types";
+import type { LifecycleStateDefinition } from "@/arches_abac_permissions/rule-types/lifecycle-state/types";
+import type { RuleTypeModule } from "@/arches_abac_permissions/rule-types/types";
 
 export default {
     key: "lifecycle_state",
     form: defineAsyncComponent(
         () =>
             import(
-                "@/arches_abac_permissions/rule_types/lifecycle_state/LifecycleStateRuleForm.vue"
+                "@/arches_abac_permissions/rule-types/lifecycle-state/LifecycleStateRuleForm/LifecycleStateRuleForm.vue"
             ),
     ),
     isComplete: (definition) =>

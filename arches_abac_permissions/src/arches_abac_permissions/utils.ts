@@ -1,5 +1,5 @@
 import { PERMISSION_NAMES } from "@/arches_abac_permissions/constants.ts";
-import { getRuleTypeForKey } from "@/arches_abac_permissions/rule_types/index.ts";
+import { getRuleTypeForKey } from "@/arches_abac_permissions/rule-types/index.ts";
 
 import type {
     Account,

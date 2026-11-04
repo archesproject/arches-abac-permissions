@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref } from "vue";
+import { computed, onBeforeUnmount, onMounted, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import ConfirmDialog from "openvue/confirmdialog";
@@ -17,11 +17,11 @@ import {
     fetchRules,
     updateRule,
 } from "@/arches_abac_permissions/api.ts";
-import AddGroupDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/AddGroupDialog.vue";
+import AddGroupDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/AddGroupDialog/AddGroupDialog.vue";
 import GroupMembership from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/GroupMembership.vue";
-import GroupPermissions from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupPermissions.vue";
+import GroupPermissions from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupPermissions/GroupPermissions.vue";
 import RuleConfiguration from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/RuleConfiguration.vue";
-import RuleList from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleList.vue";
+import RuleList from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleList/RuleList.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
     DEFAULT_SUCCESS_TOAST_LIFE,
@@ -77,7 +77,7 @@ const canSave = computed(
     () => draft.value !== null && isDraftComplete(draft.value),
 );
 
-function showError(summary: string, error: unknown) {
+function showError(summary: string, error: unknown): void {
     toast.add({
         severity: ERROR,
         life: DEFAULT_ERROR_TOAST_LIFE,
@@ -86,15 +86,15 @@ function showError(summary: string, error: unknown) {
     });
 }
 
-function sortGroups(list: Group[]) {
+function sortGroups(list: Group[]): Group[] {
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function sortRules(list: Rule[]) {
+function sortRules(list: Rule[]): Rule[] {
     return [...list].sort((a, b) => a.name.localeCompare(b.name));
 }
 
-function setDraft(value: RuleDraft | null) {
+function setDraft(value: RuleDraft | null): void {
     draft.value = value;
     savedSnapshot.value = value ? serializeDraft(value) : "";
 }
@@ -128,27 +128,27 @@ function discardUnsavedThen(proceed: () => void) {
     );
 }
 
-function selectRule(rule: Rule) {
+function selectRule(rule: Rule): void {
     if (draft.value?.id === rule.id) {
         return;
     }
     discardUnsavedThen(() => setDraft(draftFromRule(rule)));
 }
 
-function startNewRule() {
+function startNewRule(): void {
     discardUnsavedThen(() => setDraft(null));
 }
 
-function pickRuleType(ruleType: RuleTypeInfo) {
+function pickRuleType(ruleType: RuleTypeInfo): void {
     setDraft(newDraft(ruleType.key));
 }
 
-function cancel() {
+function cancel(): void {
     const saved = rules.value.find((rule) => rule.id === draft.value?.id);
     setDraft(saved ? draftFromRule(saved) : null);
 }
 
-async function save() {
+async function save(): Promise<void> {
     if (!draft.value || !canSave.value) {
         return;
     }
@@ -175,7 +175,7 @@ async function save() {
     }
 }
 
-function requestDeleteRule(rule: Rule) {
+function requestDeleteRule(rule: Rule): void {
     confirmDestructive(
         $gettext(
             "Delete the rule “%{name}”? This also removes its group permissions.",
@@ -202,7 +202,7 @@ function requestDeleteRule(rule: Rule) {
     );
 }
 
-function requestDeleteGroup(group: Group) {
+function requestDeleteGroup(group: Group): void {
     confirmDestructive(
         $gettext(
             "Delete the group “%{name}”? Its permissions on every rule will also be removed.",
@@ -237,18 +237,27 @@ function requestDeleteGroup(group: Group) {
     );
 }
 
-function onGroupCreated(group: Group) {
+function onGroupCreated(group: Group): void {
     groups.value = sortGroups([...groups.value, group]);
 }
 
-function warnBeforeUnload(event: BeforeUnloadEvent) {
+function warnBeforeUnload(event: BeforeUnloadEvent): void {
     if (isDirty.value) {
         event.preventDefault();
     }
 }
 
-onMounted(async () => {
+watchEffect(loadData);
+
+onMounted(() => {
     window.addEventListener("beforeunload", warnBeforeUnload);
+});
+
+onBeforeUnmount(() => {
+    window.removeEventListener("beforeunload", warnBeforeUnload);
+});
+
+async function loadData(): Promise<void> {
     try {
         const [loadedRules, loadedGroups, loadedTypes] = await Promise.all([
             fetchRules(),
@@ -263,11 +272,7 @@ onMounted(async () => {
     } finally {
         isLoading.value = false;
     }
-});
-
-onBeforeUnmount(() => {
-    window.removeEventListener("beforeunload", warnBeforeUnload);
-});
+}
 </script>
 
 <template>
@@ -361,7 +366,7 @@ onBeforeUnmount(() => {
 .rule-permissions {
     display: flex;
     flex-direction: column;
-    height: 100%;
+    block-size: 100%;
     font-size: 1.4rem;
     color: var(--p-text-color);
 }
@@ -379,20 +384,6 @@ onBeforeUnmount(() => {
     --p-toggleswitch-height: 2rem;
     --p-toggleswitch-handle-size: 1.6rem;
     --p-toggleswitch-gap: 0.2rem;
-    --abac-surface-bg: #f5f6fa;
-    --abac-border: #dde2ef;
-    --abac-text-secondary: #5a6a8a;
-    --abac-accent: #4a90d9;
-    --abac-surface-card: #ffffff;
-    --abac-text-primary: #1a2236;
-    --abac-accent-subtle: #b8d4f0;
-    --abac-accent-tint: rgba(74, 144, 217, 0.1);
-    --abac-row-hover: #e8f2fb;
-    --abac-brand-light: #3d5499;
-    --abac-danger: #e53e3e;
-    --abac-status-active-bg: #f0fdf4;
-    --abac-status-active-text: #166534;
-    --abac-status-active-border: #bbf7d0;
 }
 
 .rule-permissions .p-button,
@@ -417,7 +408,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 46rem minmax(30rem, 1fr) minmax(38rem, 1fr);
     grid-template-rows: auto minmax(0, 1fr);
     flex: 1;
-    min-height: 0;
+    min-block-size: 0;
 }
 
 .rule-permissions .columns {
@@ -428,7 +419,7 @@ onBeforeUnmount(() => {
     grid-template-columns: 46rem minmax(30rem, 1fr);
 }
 
-@media (max-width: 1200px) {
+@media (max-width: 75rem) {
     .rule-permissions .columns,
     .rule-permissions .columns.two-columns {
         grid-template-columns: 1fr;
@@ -440,8 +431,8 @@ onBeforeUnmount(() => {
         display: flex;
         flex-direction: column;
         grid-row: auto;
-        border-right: none;
-        border-bottom: 1px solid var(--p-content-border-color);
+        border-inline-end: none;
+        border-block-end: 0.1rem solid var(--p-content-border-color);
     }
 }
 
@@ -450,14 +441,14 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 1.6rem;
     padding: 1.2rem 2rem;
-    border-bottom: 1px solid var(--abac-border);
-    background: var(--abac-surface-card);
+    border-block-end: 0.1rem solid var(--p-abac-border);
+    background: var(--p-abac-surface-card);
 }
 
 .rule-permissions .mode-title {
     font-size: 1.4rem;
     font-weight: 600;
-    color: var(--abac-text-primary);
+    color: var(--p-abac-text-primary);
 }
 
 .rule-permissions .mode-toggle {
@@ -465,8 +456,8 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 0.4rem;
     padding: 0.3rem;
-    background: var(--abac-surface-card);
-    border: 1px solid var(--abac-border);
+    background: var(--p-abac-surface-card);
+    border: 0.1rem solid var(--p-abac-border);
     border-radius: 0.8rem;
 }
 
@@ -478,7 +469,7 @@ onBeforeUnmount(() => {
     border: none;
     border-radius: 0.6rem;
     background: transparent;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
     font: inherit;
     font-size: 1.25rem;
     font-weight: 600;
@@ -491,20 +482,20 @@ onBeforeUnmount(() => {
 
 .rule-permissions .mode-option:hover,
 .rule-permissions .mode-option.active {
-    background: var(--abac-accent-subtle);
+    background: var(--p-abac-accent-subtle);
 }
 
 .rule-permissions .mode-option.active {
-    color: var(--abac-brand-light);
+    color: var(--p-abac-brand-light);
 }
 
 .rule-permissions .mode-option:focus-visible {
-    outline: 2px solid var(--abac-accent);
-    outline-offset: 1px;
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: 0.1rem;
 }
 
 .rule-permissions .toolbar-actions {
-    margin-left: auto;
+    margin-inline-start: auto;
 }
 
 .rule-permissions .loading {
@@ -518,13 +509,13 @@ onBeforeUnmount(() => {
     display: grid;
     grid-row: span 2;
     grid-template-rows: subgrid;
-    min-height: 0;
-    background: var(--abac-surface-bg);
-    border-right: 1px solid var(--abac-border);
+    min-block-size: 0;
+    background: var(--p-abac-surface-bg);
+    border-inline-end: 0.1rem solid var(--p-abac-border);
 }
 
 .rule-permissions .column > :not(.column-header) {
-    min-height: 0;
+    min-block-size: 0;
 }
 
 .rule-permissions .column-header,
@@ -533,18 +524,18 @@ onBeforeUnmount(() => {
     align-items: center;
     gap: 0.8rem;
     padding: 0.9rem 1.2rem;
-    border-bottom: 1px solid var(--abac-border);
+    border-block-end: 0.1rem solid var(--p-abac-border);
 }
 
 .rule-permissions .column-header {
-    background: var(--abac-surface-bg);
+    background: var(--p-abac-surface-bg);
 }
 
 .rule-permissions .column-title {
     margin: 0;
     font-size: 1.3rem;
     font-weight: 600;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
     display: flex;
     align-items: center;
     gap: 0.5rem;
@@ -568,7 +559,7 @@ onBeforeUnmount(() => {
 
 .rule-permissions .column-header .header-filter {
     flex: 1;
-    min-width: 6rem;
+    min-inline-size: 6rem;
     padding: 0.6rem 0.7rem;
     font-size: 1.15rem;
     border-radius: 0.5rem;
@@ -577,7 +568,7 @@ onBeforeUnmount(() => {
 .rule-permissions .count {
     font-size: 1.1rem;
     font-weight: 500;
-    background: var(--abac-border);
+    background: var(--p-abac-border);
     border-radius: 1rem;
     padding: 0.1rem 0.7rem;
 }
@@ -587,14 +578,14 @@ onBeforeUnmount(() => {
     text-align: center;
     font-size: 1.25rem;
     font-style: italic;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .rule-permissions .field {
     display: flex;
     flex-direction: column;
     gap: 0.6rem;
-    max-width: 90rem;
+    max-inline-size: 90rem;
 }
 
 .rule-permissions .field label,
@@ -602,7 +593,7 @@ onBeforeUnmount(() => {
     margin: 0;
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
     text-transform: uppercase;
     letter-spacing: 0.05em;
 }
@@ -613,38 +604,38 @@ onBeforeUnmount(() => {
     gap: 0.4rem;
     flex-shrink: 0;
     padding: 0.3rem 0.8rem;
-    border: 1px solid var(--abac-border);
+    border: 0.1rem solid var(--p-abac-border);
     border-radius: 2rem;
     font-size: 1.1rem;
     font-weight: 600;
-    color: var(--abac-text-secondary);
-    background: var(--abac-surface-bg);
+    color: var(--p-abac-text-secondary);
+    background: var(--p-abac-surface-bg);
 }
 
 .rule-permissions .status-badge::before {
     content: "";
-    width: 0.6rem;
-    height: 0.6rem;
+    inline-size: 0.6rem;
+    block-size: 0.6rem;
     border-radius: 50%;
     background: currentColor;
 }
 
 .rule-permissions .status-badge.status-active {
-    color: var(--abac-status-active-text);
-    background: var(--abac-status-active-bg);
-    border-color: var(--abac-status-active-border);
+    color: var(--p-abac-status-active-text);
+    background: var(--p-abac-status-active-bg);
+    border-color: var(--p-abac-status-active-border);
 }
 
 .rule-permissions .more-pill {
     flex-shrink: 0;
     padding: 0.1rem 0.6rem;
-    border: 1px solid var(--abac-border);
+    border: 0.1rem solid var(--p-abac-border);
     border-radius: 0.8rem;
     font-size: 1.1rem;
     font-weight: 600;
     white-space: nowrap;
-    color: var(--abac-text-secondary);
-    background: var(--abac-surface-bg);
+    color: var(--p-abac-text-secondary);
+    background: var(--p-abac-surface-bg);
 }
 
 .rule-permissions .row-delete {
@@ -653,46 +644,52 @@ onBeforeUnmount(() => {
     border: none;
     border-radius: 0.4rem;
     background: none;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
     font-size: 1.5rem;
     line-height: 1;
     cursor: pointer;
 }
 
 .rule-permissions .row-delete:hover {
-    color: var(--abac-danger);
-    background: rgba(229, 62, 62, 0.1);
+    color: var(--p-abac-danger);
+    background: var(--p-abac-danger-tint);
 }
 
 .rule-permissions .link-button {
     padding: 0 0.2rem;
     border: none;
     background: none;
-    color: var(--abac-accent);
+    color: var(--p-abac-accent);
     font: inherit;
     font-size: 1.15rem;
     font-weight: 600;
     text-decoration: underline;
-    text-underline-offset: 2px;
+    text-underline-offset: 0.2rem;
     white-space: nowrap;
     cursor: pointer;
 }
 
 .rule-permissions .row-delete:focus-visible,
 .rule-permissions .link-button:focus-visible {
-    outline: 2px solid var(--abac-accent);
-    outline-offset: 1px;
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: 0.1rem;
 }
 
 .rule-permissions .group-tag {
     display: inline-flex;
     align-items: center;
     gap: 0.4rem;
-    padding: 0.3rem 0.6rem 0.3rem 1rem;
-    border: 1px solid color-mix(in srgb, var(--abac-accent) 30%, transparent);
+    padding-block: 0.3rem;
+    padding-inline: 1rem 0.6rem;
+    border: 0.1rem solid
+        color-mix(in srgb, var(--p-abac-accent) 30%, transparent);
     border-radius: 2rem;
-    background: var(--abac-accent-subtle);
-    color: color-mix(in srgb, var(--abac-accent) 75%, var(--abac-text-primary));
+    background: var(--p-abac-accent-subtle);
+    color: color-mix(
+        in srgb,
+        var(--p-abac-accent) 75%,
+        var(--p-abac-text-primary)
+    );
     font-size: 1.15rem;
     font-weight: 600;
     white-space: nowrap;
@@ -700,8 +697,8 @@ onBeforeUnmount(() => {
 
 .rule-permissions .sr-only {
     position: absolute;
-    width: 1px;
-    height: 1px;
+    inline-size: 0.1rem;
+    block-size: 0.1rem;
     overflow: hidden;
     clip: rect(0, 0, 0, 0);
     white-space: nowrap;

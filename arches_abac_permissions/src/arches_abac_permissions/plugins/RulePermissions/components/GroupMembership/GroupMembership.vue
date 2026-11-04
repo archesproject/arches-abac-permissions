@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Button from "openvue/button";
@@ -13,7 +13,7 @@ import {
     changeMembership,
     fetchAccounts,
 } from "@/arches_abac_permissions/api.ts";
-import AddAccountsDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddAccountsDialog.vue";
+import AddAccountsDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddAccountsDialog/AddAccountsDialog.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
     ERROR,
@@ -56,7 +56,7 @@ const groupsById = computed(
     () => new Map(props.groups.map((group) => [group.id, group])),
 );
 
-function groupNames(account: Account) {
+function groupNames(account: Account): string[] {
     return account.groups
         .map((id) => groupsById.value.get(id)?.name)
         .filter((name): name is string => Boolean(name));
@@ -114,11 +114,11 @@ const addableGroups = computed(() => {
     return props.groups.filter((group) => !full.has(group.id));
 });
 
-function toggleFilter(value: number | typeof UNGROUPED) {
+function toggleFilter(value: number | typeof UNGROUPED): void {
     groupFilter.value = groupFilter.value === value ? null : value;
 }
 
-function toggleChecked(account: Account) {
+function toggleChecked(account: Account): void {
     checkedIds.value = checkedIds.value.includes(account.id)
         ? checkedIds.value.filter((id) => id !== account.id)
         : [...checkedIds.value, account.id];
@@ -127,26 +127,26 @@ function toggleChecked(account: Account) {
     }
 }
 
-function selectAllVisible() {
+function selectAllVisible(): void {
     checkedIds.value = visibleAccounts.value.map((a) => a.id);
 }
 
-function clearChecked() {
+function clearChecked(): void {
     checkedIds.value = [];
     isBulkEditing.value = false;
 }
 
-function openAccount(account: Account) {
+function openAccount(account: Account): void {
     activeId.value = account.id;
     isBulkEditing.value = false;
 }
 
-function openBulkEdit() {
+function openBulkEdit(): void {
     isBulkEditing.value = true;
     activeId.value = null;
 }
 
-async function apply(add: number[], remove: number[]) {
+async function apply(add: number[], remove: number[]): Promise<void> {
     const ids = editedAccounts.value.map((a) => a.id);
     isSaving.value = true;
     try {
@@ -159,12 +159,12 @@ async function apply(add: number[], remove: number[]) {
     }
 }
 
-function mergeAccounts(updated: Account[]) {
+function mergeAccounts(updated: Account[]): void {
     const byId = new Map(updated.map((a) => [a.id, a]));
     accounts.value = accounts.value.map((a) => byId.get(a.id) ?? a);
 }
 
-function showError(summary: string, error: unknown) {
+function showError(summary: string, error: unknown): void {
     toast.add({
         severity: ERROR,
         life: DEFAULT_ERROR_TOAST_LIFE,
@@ -173,16 +173,18 @@ function showError(summary: string, error: unknown) {
     });
 }
 
-function initials(account: Account) {
+function initials(account: Account): string {
     const letters = `${account.first_name.charAt(0)}${account.last_name.charAt(0)}`;
     return (letters || account.username.charAt(0)).toUpperCase();
 }
 
-function formatDate(value: string | null) {
+function formatDate(value: string | null): string {
     return value ? new Date(value).toLocaleString() : $gettext("Never");
 }
 
-onMounted(async () => {
+watchEffect(loadAccounts);
+
+async function loadAccounts(): Promise<void> {
     try {
         accounts.value = await fetchAccounts();
     } catch (error) {
@@ -190,7 +192,7 @@ onMounted(async () => {
     } finally {
         isLoading.value = false;
     }
-});
+}
 </script>
 
 <template>
@@ -391,7 +393,7 @@ onMounted(async () => {
                     >
                         <Checkbox
                             class="account-check"
-                            binary
+                            :binary="true"
                             :model-value="checkedIds.includes(account.id)"
                             :aria-label="
                                 $gettext('Select %{name}', {
@@ -552,7 +554,12 @@ onMounted(async () => {
                             </div>
                         </dl>
                     </div>
-                    <dl class="profile">
+                </template>
+                <div class="editor-body">
+                    <dl
+                        v-if="activeAccount && !isBulkEditing"
+                        class="profile"
+                    >
                         <div>
                             <dt class="section-label">
                                 {{ $gettext("Username") }}
@@ -566,106 +573,109 @@ onMounted(async () => {
                             <dd>{{ activeAccount.email || "—" }}</dd>
                         </div>
                     </dl>
-                </template>
-                <div
-                    v-else
-                    class="bulk-intro"
-                >
-                    <i
-                        class="pi pi-users"
-                        aria-hidden="true"
-                    ></i>
-                    <span>
-                        {{ $gettext("Editing group membership for") }}
-                        <strong>{{
-                            $gettext("%{count} accounts", {
-                                count: String(editedAccounts.length),
-                            })
-                        }}</strong>
-                    </span>
-                </div>
-
-                <div
-                    class="membership"
-                    :class="{ divided: !isBulkEditing }"
-                >
-                    <h3 class="section-label">
-                        {{ $gettext("Group Membership") }}
-                    </h3>
-                    <p
-                        v-if="isBulkEditing"
-                        class="hint"
+                    <div
+                        v-else
+                        class="bulk-intro"
                     >
-                        {{
-                            $gettext(
-                                "Groups at reduced opacity are not held by all selected accounts.",
-                            )
-                        }}
-                    </p>
-                    <ul class="tags">
-                        <li
-                            v-if="holdings.length === 0"
-                            class="no-groups"
+                        <i
+                            class="pi pi-users"
+                            aria-hidden="true"
+                        ></i>
+                        <span>
+                            {{ $gettext("Editing group membership for") }}
+                            <strong>{{
+                                $gettext("%{count} accounts", {
+                                    count: String(editedAccounts.length),
+                                })
+                            }}</strong>
+                        </span>
+                    </div>
+
+                    <div
+                        class="membership"
+                        :class="{ divided: !isBulkEditing }"
+                    >
+                        <h3 class="section-label">
+                            {{ $gettext("Group Membership") }}
+                        </h3>
+                        <p
+                            v-if="isBulkEditing"
+                            class="hint"
                         >
                             {{
-                                isBulkEditing
-                                    ? $gettext(
-                                          "No groups assigned to any selected account",
-                                      )
-                                    : $gettext("No groups assigned")
+                                $gettext(
+                                    "Groups at reduced opacity are not held by all selected accounts.",
+                                )
                             }}
-                        </li>
-                        <li
-                            v-for="holding in holdings"
-                            :key="holding.groupId"
-                            class="group-tag"
-                            :class="{
-                                partial: holding.count < editedAccounts.length,
-                            }"
-                        >
-                            {{ holding.group?.name }}
-                            <span
-                                v-if="isBulkEditing"
-                                class="tag-count"
+                        </p>
+                        <ul class="tags">
+                            <li
+                                v-if="holdings.length === 0"
+                                class="no-groups"
                             >
-                                ({{ holding.count }}/{{
-                                    editedAccounts.length
-                                }})
-                            </span>
-                            <button
-                                type="button"
-                                class="tag-remove"
-                                :disabled="isSaving"
-                                :aria-label="
-                                    $gettext('Remove from %{group}', {
-                                        group: holding.group?.name ?? '',
-                                    })
-                                "
-                                @click="apply([], [holding.groupId])"
+                                {{
+                                    isBulkEditing
+                                        ? $gettext(
+                                              "No groups assigned to any selected account",
+                                          )
+                                        : $gettext("No groups assigned")
+                                }}
+                            </li>
+                            <li
+                                v-for="holding in holdings"
+                                :key="holding.groupId"
+                                class="group-tag"
+                                :class="{
+                                    partial:
+                                        holding.count < editedAccounts.length,
+                                }"
                             >
-                                <i
-                                    class="pi pi-times"
-                                    aria-hidden="true"
-                                ></i>
-                            </button>
-                        </li>
-                    </ul>
-                    <Select
-                        v-if="addableGroups.length > 0"
-                        v-model="pendingGroup"
-                        class="add-to-group"
-                        :options="addableGroups"
-                        option-label="name"
-                        option-value="id"
-                        :disabled="isSaving"
-                        :aria-label="$gettext('Add to group')"
-                        :placeholder="
-                            isBulkEditing
-                                ? $gettext('Add to all selected…')
-                                : $gettext('Add to group…')
-                        "
-                        @update:model-value="(id: number) => apply([id], [])"
-                    />
+                                {{ holding.group?.name }}
+                                <span
+                                    v-if="isBulkEditing"
+                                    class="tag-count"
+                                >
+                                    ({{ holding.count }}/{{
+                                        editedAccounts.length
+                                    }})
+                                </span>
+                                <button
+                                    type="button"
+                                    class="tag-remove"
+                                    :disabled="isSaving"
+                                    :aria-label="
+                                        $gettext('Remove from %{group}', {
+                                            group: holding.group?.name ?? '',
+                                        })
+                                    "
+                                    @click="apply([], [holding.groupId])"
+                                >
+                                    <i
+                                        class="pi pi-times"
+                                        aria-hidden="true"
+                                    ></i>
+                                </button>
+                            </li>
+                        </ul>
+                        <Select
+                            v-if="addableGroups.length > 0"
+                            v-model="pendingGroup"
+                            class="add-to-group"
+                            :options="addableGroups"
+                            option-label="name"
+                            option-value="id"
+                            :disabled="isSaving"
+                            :aria-label="$gettext('Add to group')"
+                            :placeholder="
+                                isBulkEditing
+                                    ? $gettext('Add to all selected…')
+                                    : $gettext('Add to group…')
+                            "
+                            @update:model-value="
+                                (id: number) => apply([id], [])
+                            "
+                        />
+                    </div>
                 </div>
             </div>
         </section>
@@ -688,16 +698,16 @@ onMounted(async () => {
     grid-template-columns: 46rem 46rem;
     grid-template-rows: auto minmax(0, 1fr);
     flex: 1;
-    min-height: 0;
+    min-block-size: 0;
     overflow: auto;
-    background: var(--abac-surface-bg);
+    background: var(--p-abac-surface-bg);
 }
 
 .membership-columns.with-editor {
     grid-template-columns: 46rem 46rem minmax(32rem, 1fr);
 }
 
-@media (max-width: 1400px) {
+@media (max-width: 87.5rem) {
     .membership-columns,
     .membership-columns.with-editor {
         grid-template-columns: 1fr;
@@ -713,7 +723,7 @@ onMounted(async () => {
 }
 
 .toolbar-actions {
-    margin-left: auto;
+    margin-inline-start: auto;
     display: flex;
     align-items: center;
     gap: 0.4rem;
@@ -721,7 +731,7 @@ onMounted(async () => {
 
 .header-filter {
     flex: 1;
-    min-width: 6rem;
+    min-inline-size: 6rem;
 }
 
 .item-list {
@@ -734,7 +744,7 @@ onMounted(async () => {
 
 .account-body {
     flex: 1;
-    min-height: 0;
+    min-block-size: 0;
     display: flex;
     flex-direction: column;
     overflow-y: auto;
@@ -748,24 +758,24 @@ onMounted(async () => {
     display: flex;
     align-items: center;
     gap: 0.4rem;
-    padding-right: 0.8rem;
-    border-bottom: 1px solid var(--abac-border);
-    background: var(--abac-surface-card);
-    color: var(--abac-text-primary);
+    padding-inline-end: 0.8rem;
+    border-block-end: 0.1rem solid var(--p-abac-border);
+    background: var(--p-abac-surface-card);
+    color: var(--p-abac-text-primary);
     font-size: 1.25rem;
 }
 
 .item-row:hover {
-    background: var(--abac-row-hover);
+    background: var(--p-abac-row-hover);
 }
 
 .item-row.checked {
-    background: var(--abac-accent-subtle);
+    background: var(--p-abac-accent-subtle);
 }
 
 .item-row.selected {
-    background: var(--abac-accent-subtle);
-    color: var(--abac-brand-light);
+    background: var(--p-abac-accent-subtle);
+    color: var(--p-abac-brand-light);
 }
 
 .item-row.selected .item-name {
@@ -773,60 +783,61 @@ onMounted(async () => {
 }
 
 .item-row.ungrouped {
-    border-top: 1px solid var(--abac-border);
+    border-block-start: 0.1rem solid var(--p-abac-border);
     opacity: 0.8;
 }
 
 .item-row.ungrouped .item-name {
     font-style: italic;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .row-icon {
     flex-shrink: 0;
     font-size: 1.3rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .item-row.selected .row-icon {
-    color: var(--abac-brand-light);
+    color: var(--p-abac-brand-light);
 }
 
 .group-count {
     flex-shrink: 0;
-    margin-right: 0.6rem;
+    margin-inline-end: 0.6rem;
     padding: 0.1rem 0.6rem;
-    border: 1px solid var(--abac-border);
+    border: 0.1rem solid var(--p-abac-border);
     border-radius: 0.8rem;
-    background: var(--abac-surface-bg);
-    color: var(--abac-text-secondary);
+    background: var(--p-abac-surface-bg);
+    color: var(--p-abac-text-secondary);
     font-size: 1.05rem;
     font-weight: 500;
 }
 
 .item-select {
     flex: 1;
-    min-width: 0;
+    min-inline-size: 0;
     display: flex;
     align-items: center;
     gap: 0.8rem;
-    padding: 0.8rem 0 0.8rem 1.2rem;
+    padding-block: 0.8rem;
+    padding-inline: 1.2rem 0;
     border: none;
     background: none;
-    text-align: left;
+    text-align: start;
     cursor: pointer;
     color: inherit;
     font: inherit;
 }
 
 .item-select:focus-visible {
-    outline: 2px solid var(--abac-accent);
-    outline-offset: -2px;
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: -0.2rem;
 }
 
 .item-name {
     flex: 1;
-    min-width: 0;
+    min-inline-size: 0;
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -838,25 +849,27 @@ onMounted(async () => {
 
 /* Centre the checkbox on the fixed-height first (name) line. */
 .account-check {
-    margin: calc(0.9rem + (2.4rem - 1.4rem) / 2) 0 0 1.2rem;
+    margin-block: 1.4rem 0;
+    margin-inline: 1.2rem 0;
 }
 
 .item-select.stacked > .line:first-child {
-    min-height: 2.4rem;
+    min-block-size: 2.4rem;
 }
 
 .item-select.stacked {
     flex-direction: column;
     align-items: stretch;
     gap: 0.3rem;
-    padding: 0.9rem 0 0.9rem 0.6rem;
+    padding-block: 0.9rem;
+    padding-inline: 0.6rem 0;
 }
 
 .line {
     display: flex;
     align-items: center;
     gap: 0.6rem;
-    min-width: 0;
+    min-inline-size: 0;
 }
 
 .account-name {
@@ -869,14 +882,14 @@ onMounted(async () => {
     font-weight: 600;
     color: color-mix(
         in srgb,
-        var(--abac-accent) 80%,
-        var(--abac-text-secondary)
+        var(--p-abac-accent) 80%,
+        var(--p-abac-text-secondary)
     );
 }
 
 .account-groups {
     font-size: 1.2rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
@@ -888,26 +901,30 @@ onMounted(async () => {
 
 .selection-bar {
     position: sticky;
-    top: 0;
+    inset-block-start: 0;
     z-index: 2;
     display: flex;
     align-items: center;
     gap: 0.8rem;
     padding: 0.6rem 1rem;
-    border-bottom: 1px solid var(--abac-border);
-    background: var(--abac-surface-bg);
+    border-block-end: 0.1rem solid var(--p-abac-border);
+    background: var(--p-abac-surface-bg);
 }
 
 .selection-bar > .pi {
     font-size: 1.1rem;
-    color: var(--abac-accent);
+    color: var(--p-abac-accent);
 }
 
 .selection-count {
     flex: 1;
     font-size: 1.15rem;
     font-weight: 600;
-    color: color-mix(in srgb, var(--abac-accent) 75%, var(--abac-text-primary));
+    color: color-mix(
+        in srgb,
+        var(--p-abac-accent) 75%,
+        var(--p-abac-text-primary)
+    );
 }
 
 .selection-bar :deep(.edit-group.p-button) {
@@ -935,7 +952,7 @@ onMounted(async () => {
 
 .editor-title {
     flex: 1;
-    min-width: 0;
+    min-inline-size: 0;
 }
 
 .truncate {
@@ -947,40 +964,49 @@ onMounted(async () => {
 .editor {
     flex: 1;
     overflow-y: auto;
-    padding: 1.6rem 1.4rem 1.6rem 2rem;
+}
+
+.editor-body {
+    padding-block: 1.6rem;
+    padding-inline: 2rem 1.4rem;
+}
+
+.hero + .editor-body {
+    padding-block-start: 2rem;
 }
 
 .hero {
-    margin: -1.6rem -1.4rem 2rem -2rem;
-    padding: 1.6rem 1.4rem 1.6rem 2rem;
-    border-bottom: 1px solid var(--abac-border);
-    background: var(--abac-surface-card);
+    padding-block: 1.6rem;
+    padding-inline: 2rem 1.4rem;
+    border-block-end: 0.1rem solid var(--p-abac-border);
+    background: var(--p-abac-surface-card);
 }
 
 .hero-head {
     display: flex;
     align-items: center;
     gap: 1.4rem;
-    margin-bottom: 1.6rem;
+    margin-block-end: 1.6rem;
 }
 
 .avatar {
     flex-shrink: 0;
-    width: 4.8rem;
-    height: 4.8rem;
+    inline-size: 4.8rem;
+    block-size: 4.8rem;
     display: flex;
     align-items: center;
     justify-content: center;
-    border: 2px solid color-mix(in srgb, var(--abac-accent) 40%, transparent);
+    border: 0.2rem solid
+        color-mix(in srgb, var(--p-abac-accent) 40%, transparent);
     border-radius: 50%;
-    background: var(--abac-accent-subtle);
-    color: var(--abac-accent);
+    background: var(--p-abac-accent-subtle);
+    color: var(--p-abac-accent);
     font-size: 1.8rem;
     font-weight: 700;
 }
 
 .hero-text {
-    min-width: 0;
+    min-inline-size: 0;
 }
 
 .hero-name {
@@ -989,14 +1015,14 @@ onMounted(async () => {
     white-space: nowrap;
     font-size: 1.6rem;
     font-weight: 700;
-    color: var(--abac-text-primary);
+    color: var(--p-abac-text-primary);
 }
 
 .hero-sub {
     display: block;
-    margin-top: 0.2rem;
+    margin-block-start: 0.2rem;
     font-size: 1.25rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .dates {
@@ -1018,25 +1044,26 @@ onMounted(async () => {
     font-weight: 700;
     text-transform: uppercase;
     letter-spacing: 0.05em;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .dates dd,
 .profile dd {
     margin: 0;
     font-size: 1.25rem;
-    color: var(--abac-text-primary);
+    color: var(--p-abac-text-primary);
 }
 
 .dot {
-    color: var(--abac-border);
+    color: var(--p-abac-border);
 }
 
 .profile {
     display: flex;
     flex-direction: column;
     gap: 1.4rem;
-    margin: 0 0 2.4rem;
+    margin-block: 0 2.4rem;
+    margin-inline: 0;
 }
 
 .profile > div {
@@ -1059,43 +1086,49 @@ onMounted(async () => {
     display: flex;
     align-items: center;
     gap: 0.8rem;
-    margin-bottom: 2rem;
-    padding-bottom: 1.6rem;
-    border-bottom: 1px solid var(--abac-border);
+    margin-block-end: 2rem;
+    padding-block-end: 1.6rem;
+    border-block-end: 0.1rem solid var(--p-abac-border);
     font-size: 1.3rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .bulk-intro .pi {
     font-size: 1.6rem;
-    color: var(--abac-accent);
+    color: var(--p-abac-accent);
 }
 
 .bulk-intro strong {
-    color: var(--abac-text-primary);
+    color: var(--p-abac-text-primary);
 }
 
 .membership.divided {
-    padding-top: 1.6rem;
-    border-top: 1px solid var(--abac-border);
+    padding-block-start: 1.6rem;
+    border-block-start: 0.1rem solid var(--p-abac-border);
 }
 
 .membership .section-label {
     font-weight: 700;
-    margin-bottom: 1rem;
+    margin-block-end: 1rem;
+}
+
+.membership .section-label:has(+ .hint) {
+    margin-block-end: 0.6rem;
 }
 
 .hint {
-    margin: -0.4rem 0 1rem;
+    margin-block: 0 1rem;
+    margin-inline: 0;
     font-size: 1.15rem;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .tags {
     list-style: none;
-    margin: 0 0 1.2rem;
+    margin-block: 0 1.2rem;
+    margin-inline: 0;
     padding: 0;
-    min-height: 2.6rem;
+    min-block-size: 2.6rem;
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
@@ -1105,12 +1138,12 @@ onMounted(async () => {
     align-self: center;
     font-size: 1.25rem;
     font-style: italic;
-    color: var(--abac-text-secondary);
+    color: var(--p-abac-text-secondary);
 }
 
 .group-tag.partial {
-    background: var(--abac-row-hover);
-    border-color: var(--abac-border);
+    background: var(--p-abac-row-hover);
+    border-color: var(--p-abac-border);
 }
 
 .tag-count {
@@ -1124,7 +1157,7 @@ onMounted(async () => {
     padding: 0.2rem;
     border: none;
     background: none;
-    color: var(--abac-brand-light);
+    color: var(--p-abac-brand-light);
     opacity: 0.6;
     cursor: pointer;
     line-height: 1;
@@ -1141,12 +1174,12 @@ onMounted(async () => {
 }
 
 .tag-remove:focus-visible {
-    outline: 2px solid var(--abac-accent);
+    outline: 0.2rem solid var(--p-abac-accent);
     border-radius: 50%;
 }
 
 .add-to-group {
-    width: 100%;
-    max-width: 30rem;
+    inline-size: 100%;
+    max-inline-size: 30rem;
 }
 </style>
