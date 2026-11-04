@@ -31,6 +31,19 @@ class InclusionRule(models.Model):
         )
 
     @classmethod
+    def clean_definition(cls, raw_definition, definition_keys):
+        """
+        Coerce a client-submitted definition to what the rule stores. The
+        default keeps ``definition_keys`` as strings; rules with structured
+        values (e.g. geometry) override this.
+        """
+        return {
+            key: str(raw_definition[key])
+            for key in definition_keys
+            if raw_definition.get(key) is not None
+        }
+
+    @classmethod
     def validate_definition(cls, inclusion_rule):
         """
         Raise ValidationError if ``inclusion_rule.definition`` is not valid

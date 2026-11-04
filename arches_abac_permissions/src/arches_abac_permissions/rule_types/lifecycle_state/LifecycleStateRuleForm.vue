@@ -1,27 +1,51 @@
 <script setup lang="ts">
-import { computed } from "vue";
+import { computed, onMounted, ref } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Select from "openvue/select";
+import { useToast } from "openvue/usetoast";
+
+import {
+    DEFAULT_ERROR_TOAST_LIFE,
+    ERROR,
+} from "@/arches_abac_permissions/constants.ts";
+import { fetchResourceModels } from "@/arches_abac_permissions/rule_types/lifecycle_state/api.ts";
 
 import type {
     LifecycleStateDefinition,
     ResourceModel,
-} from "@/arches_abac_permissions/types";
+} from "@/arches_abac_permissions/rule_types/lifecycle_state/types";
 
 const { $gettext } = useGettext();
+const toast = useToast();
 
-const props = defineProps<{ resourceModels: ResourceModel[] }>();
 const definition = defineModel<Partial<LifecycleStateDefinition>>({
     required: true,
 });
+const resourceModels = ref<ResourceModel[]>([]);
+const isLoading = ref(true);
 
 const lifecycleStates = computed(
     () =>
-        props.resourceModels.find(
+        resourceModels.value.find(
             (model) => model.graphid === definition.value.graphid,
         )?.lifecycle_states ?? [],
 );
+
+onMounted(async () => {
+    try {
+        resourceModels.value = await fetchResourceModels();
+    } catch (error) {
+        toast.add({
+            severity: ERROR,
+            life: DEFAULT_ERROR_TOAST_LIFE,
+            summary: $gettext("Unable to load resource models"),
+            detail: error instanceof Error ? error.message : undefined,
+        });
+    } finally {
+        isLoading.value = false;
+    }
+});
 
 function onModelChange(graphid: string | null) {
     // States belong to a model's lifecycle, so a new model resets the state.
@@ -45,6 +69,7 @@ function onStateChange(stateId: string | null) {
             input-id="abac-resource-model"
             :model-value="definition.graphid"
             :options="resourceModels"
+            :loading="isLoading"
             option-label="name"
             option-value="graphid"
             filter

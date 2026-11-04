@@ -15,8 +15,8 @@ from arches.app.views.api import APIBase
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.rule_types import (
     PERMISSION_CODENAMES,
-    RULE_TYPES,
     get_rule_type_for_classname,
+    get_rule_types,
 )
 
 GROUP_NAME_MAX_LENGTH = 150
@@ -80,7 +80,7 @@ def serialize_rule(rule):
 
 
 def get_rules_queryset():
-    classnames = [rule_type.classname for rule_type in RULE_TYPES.values()]
+    classnames = [rule_type.classname for rule_type in get_rule_types().values()]
     return InclusionRule.objects.filter(classname__in=classnames).prefetch_related(
         "group_permissions__permissions"
     )
@@ -98,25 +98,24 @@ def parse_rule_payload(body):
     if not isinstance(active, bool):
         raise BadRequest(_("'active' must be true or false."))
 
-    rule_type = RULE_TYPES.get(body.get("rule_type"))
+    rule_type = get_rule_types().get(body.get("rule_type"))
     if rule_type is None or not rule_type.available:
         raise BadRequest(_("Unknown rule type."))
 
     raw_definition = body.get("definition")
     if not isinstance(raw_definition, dict):
         raise BadRequest(_("A rule definition is required."))
-    definition = {
-        key: str(raw_definition[key])
-        for key in rule_type.definition_keys
-        if raw_definition.get(key) is not None
-    }
     rule = InclusionRule(
         modulename=rule_type.modulename,
         classname=rule_type.classname,
-        definition=definition,
     )
+    rule_class = rule.get_class_module()
     try:
-        rule.get_class_module().validate_definition(rule)
+        definition = rule_class.clean_definition(
+            raw_definition, rule_type.definition_keys
+        )
+        rule.definition = definition
+        rule_class.validate_definition(rule)
     except ValidationError as e:
         raise BadRequest(" ".join(e.messages))
 
@@ -233,7 +232,7 @@ class RuleTypesView(SuperuserAPIView):
                         "description": str(rule_type.description),
                         "icon": rule_type.icon,
                     }
-                    for rule_type in RULE_TYPES.values()
+                    for rule_type in get_rule_types().values()
                     if rule_type.available
                 ]
             }
@@ -277,7 +276,10 @@ class ResourceSetsView(SuperuserAPIView):
         from arches_resource_sets.models import ResourceSet
 
         resource_sets = [
-            {"id": str(resource_set.pk), "name": str(resource_set.description or "")}
+            {
+                "id": str(resource_set.pk),
+                "name": str(resource_set.description or "") or str(resource_set.pk),
+            }
             for resource_set in ResourceSet.objects.all()
         ]
         resource_sets.sort(key=lambda resource_set: resource_set["name"].lower())

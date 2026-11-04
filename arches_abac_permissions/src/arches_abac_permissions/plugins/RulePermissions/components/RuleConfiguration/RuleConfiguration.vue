@@ -5,51 +5,23 @@ import { useGettext } from "vue3-gettext";
 import InputText from "openvue/inputtext";
 import Textarea from "openvue/textarea";
 
-import RuleTypePicker from "@/arches_abac_permissions/components/RuleTypePicker.vue";
-import LifecycleStateRuleForm from "@/arches_abac_permissions/components/rule_types/LifecycleStateRuleForm.vue";
-import ResourceSetRuleForm from "@/arches_abac_permissions/components/rule_types/ResourceSetRuleForm.vue";
-import {
-    LIFECYCLE_STATE,
-    RESOURCE_SET,
-} from "@/arches_abac_permissions/constants.ts";
+import RuleTypePicker from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/components/RuleTypePicker.vue";
+import { getRuleTypeForKey } from "@/arches_abac_permissions/rule_types/index.ts";
 
-import type {
-    ResourceModel,
-    ResourceSet,
-    RuleDraft,
-    RuleTypeInfo,
-} from "@/arches_abac_permissions/types";
+import type { RuleDraft, RuleTypeInfo } from "@/arches_abac_permissions/types";
 
 const { $gettext } = useGettext();
 
 const props = defineProps<{
     ruleTypes: RuleTypeInfo[];
-    resourceModels: ResourceModel[];
-    resourceSets: ResourceSet[];
 }>();
 const draft = defineModel<RuleDraft | null>({ required: true });
 const emit = defineEmits<{ (e: "pick", ruleType: RuleTypeInfo): void }>();
 
-// Add new rule types here with a form component taking v-model="definition".
-const RULE_TYPE_FORMS = {
-    [LIFECYCLE_STATE]: LifecycleStateRuleForm,
-    [RESOURCE_SET]: ResourceSetRuleForm,
-};
-
 const ruleType = computed(() =>
     props.ruleTypes.find((type) => type.key === draft.value?.rule_type),
 );
-const form = computed(
-    () =>
-        RULE_TYPE_FORMS[
-            (draft.value?.rule_type ?? "") as keyof typeof RULE_TYPE_FORMS
-        ],
-);
-const formProps = computed(() =>
-    draft.value?.rule_type === RESOURCE_SET
-        ? { resourceSets: props.resourceSets }
-        : { resourceModels: props.resourceModels },
-);
+const form = computed(() => getRuleTypeForKey(draft.value?.rule_type)?.form);
 const heading = computed(() => {
     if (!draft.value) {
         return "";
@@ -115,7 +87,6 @@ const heading = computed(() => {
                     :is="form"
                     v-if="form"
                     v-model="draft.definition"
-                    v-bind="formProps"
                 />
             </form>
         </div>

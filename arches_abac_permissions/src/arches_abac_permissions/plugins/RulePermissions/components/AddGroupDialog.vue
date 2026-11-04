@@ -51,7 +51,7 @@ async function submit() {
         modal
         :draggable="false"
         :header="$gettext('Add Group')"
-        :style="{ width: '40rem' }"
+        class="abac-add-group-dialog"
     >
         <form
             class="add-group-form"
@@ -93,6 +93,13 @@ async function submit() {
         </form>
     </Dialog>
 </template>
+
+<style>
+/* Unscoped: Dialog is teleported out of this component. */
+.abac-add-group-dialog {
+    width: 40rem;
+}
+</style>
 
 <style scoped>
 .add-group-form {

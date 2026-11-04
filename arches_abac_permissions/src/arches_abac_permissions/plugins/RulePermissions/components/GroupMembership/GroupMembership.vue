@@ -13,7 +13,7 @@ import {
     changeMembership,
     fetchAccounts,
 } from "@/arches_abac_permissions/api.ts";
-import AddAccountsDialog from "@/arches_abac_permissions/components/AddAccountsDialog.vue";
+import AddAccountsDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddAccountsDialog.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
     ERROR,

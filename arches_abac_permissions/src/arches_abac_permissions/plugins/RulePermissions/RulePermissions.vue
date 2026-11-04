@@ -13,17 +13,15 @@ import {
     deleteGroup,
     deleteRule,
     fetchGroups,
-    fetchResourceModels,
-    fetchResourceSets,
     fetchRuleTypes,
     fetchRules,
     updateRule,
 } from "@/arches_abac_permissions/api.ts";
-import AddGroupDialog from "@/arches_abac_permissions/components/AddGroupDialog.vue";
-import GroupMembership from "@/arches_abac_permissions/components/GroupMembership.vue";
-import GroupPermissions from "@/arches_abac_permissions/components/GroupPermissions.vue";
-import RuleConfiguration from "@/arches_abac_permissions/components/RuleConfiguration.vue";
-import RuleList from "@/arches_abac_permissions/components/RuleList.vue";
+import AddGroupDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/AddGroupDialog.vue";
+import GroupMembership from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/GroupMembership.vue";
+import GroupPermissions from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupPermissions.vue";
+import RuleConfiguration from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/RuleConfiguration.vue";
+import RuleList from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleList.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
     DEFAULT_SUCCESS_TOAST_LIFE,
@@ -40,8 +38,6 @@ import {
 
 import type {
     Group,
-    ResourceModel,
-    ResourceSet,
     Rule,
     RuleDraft,
     RuleTypeInfo,
@@ -54,8 +50,6 @@ const toast = useToast();
 const rules = ref<Rule[]>([]);
 const groups = ref<Group[]>([]);
 const ruleTypes = ref<RuleTypeInfo[]>([]);
-const resourceModels = ref<ResourceModel[]>([]);
-const resourceSets = ref<ResourceSet[]>([]);
 const isLoading = ref(true);
 const isSaving = ref(false);
 const showAddGroup = ref(false);
@@ -256,24 +250,14 @@ function warnBeforeUnload(event: BeforeUnloadEvent) {
 onMounted(async () => {
     window.addEventListener("beforeunload", warnBeforeUnload);
     try {
-        const [
-            loadedRules,
-            loadedGroups,
-            loadedTypes,
-            loadedModels,
-            loadedSets,
-        ] = await Promise.all([
+        const [loadedRules, loadedGroups, loadedTypes] = await Promise.all([
             fetchRules(),
             fetchGroups(),
             fetchRuleTypes(),
-            fetchResourceModels(),
-            fetchResourceSets(),
         ]);
         rules.value = sortRules(loadedRules);
         groups.value = sortGroups(loadedGroups);
         ruleTypes.value = loadedTypes;
-        resourceModels.value = loadedModels;
-        resourceSets.value = loadedSets;
     } catch (error) {
         showError($gettext("Unable to load rule permissions"), error);
     } finally {
@@ -348,8 +332,6 @@ onBeforeUnmount(() => {
                 <RuleConfiguration
                     v-model="draft"
                     :rule-types="ruleTypes"
-                    :resource-models="resourceModels"
-                    :resource-sets="resourceSets"
                     @pick="pickRuleType"
                 />
                 <GroupPermissions

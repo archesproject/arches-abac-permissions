@@ -3,6 +3,7 @@ from urllib.parse import quote, urlencode
 
 from django.core.exceptions import ValidationError
 from django.urls import reverse
+from django.utils.translation import gettext_lazy
 
 from arches.app.models.models import (
     GraphModel,
@@ -10,6 +11,7 @@ from arches.app.models.models import (
     ResourceInstanceLifecycleState,
 )
 from arches_abac_permissions.models import InclusionRule
+from arches_abac_permissions.rule_types import RuleType
 
 
 class LifecycleStateRule(InclusionRule):
@@ -20,6 +22,16 @@ class LifecycleStateRule(InclusionRule):
 
     The lifecycle state must belong to the graph's resource instance lifecycle.
     """
+
+    rule_type = RuleType(
+        key="lifecycle_state",
+        label=gettext_lazy("Resource has Lifecycle State"),
+        description=gettext_lazy(
+            "Matches resources of a resource model that are in a lifecycle state"
+        ),
+        icon="pi pi-sync",
+        definition_keys=("graphid", "lifecycle_state_id"),
+    )
 
     @classmethod
     def get_search_rule_url(cls, inclusion_rule):

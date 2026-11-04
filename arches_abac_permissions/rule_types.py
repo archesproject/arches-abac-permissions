@@ -1,50 +1,60 @@
-from dataclasses import dataclass
+from dataclasses import dataclass, field, replace
 
 from django.apps import apps
-from django.utils.translation import gettext_lazy as _
 
 
 @dataclass(frozen=True)
 class RuleType:
+    """
+    UI metadata a rule class declares as its `rule_type` attribute to make
+    it creatable from the rule-permissions plugin.
+    """
+
     key: str
-    modulename: str
-    classname: str
     label: str
     description: str
     icon: str
     definition_keys: tuple[str, ...]
     required_app: str | None = None
+    modulename: str = field(default="", compare=False)
+    classname: str = field(default="", compare=False)
 
     @property
     def available(self):
         return self.required_app is None or apps.is_installed(self.required_app)
 
 
-# Types the rule-permissions UI can create and edit. Clients send only the
-# key; the module and class are always resolved here.
-RULE_TYPES = {
-    "lifecycle_state": RuleType(
-        key="lifecycle_state",
-        modulename="lifecycle_state_rule.py",
-        classname="LifecycleStateRule",
-        label=_("Resource has Lifecycle State"),
-        description=_(
-            "Matches resources of a resource model that are in a lifecycle state"
-        ),
-        icon="pi pi-sync",
-        definition_keys=("graphid", "lifecycle_state_id"),
-    ),
-    "resource_set": RuleType(
-        key="resource_set",
-        modulename="resource_set_rule.py",
-        classname="ResourceSetRule",
-        label=_("Resource is in Resource Set"),
-        description=_("Matches the members of a resource set"),
-        icon="pi pi-th-large",
-        definition_keys=("resource_set_id",),
-        required_app="arches_resource_sets",
-    ),
-}
+def _rule_classes(base):
+    for subclass in base.__subclasses__():
+        yield subclass
+        yield from _rule_classes(subclass)
+
+
+def get_rule_types():
+    """
+    Rule types keyed by `RuleType.key`. Clients send only the key; module and
+    class names are always resolved here from the declaring rule class.
+    """
+    from arches_abac_permissions.models import InclusionRule
+
+    rule_types = {}
+    for rule_class in _rule_classes(InclusionRule):
+        rule_type = rule_class.__dict__.get("rule_type")
+        if isinstance(rule_type, RuleType):
+            rule_types[rule_type.key] = replace(
+                rule_type,
+                modulename=f"{rule_class.__module__.rsplit('.', 1)[-1]}.py",
+                classname=rule_class.__name__,
+            )
+    return rule_types
+
+
+def get_rule_type_for_classname(classname):
+    for rule_type in get_rule_types().values():
+        if rule_type.classname == classname:
+            return rule_type
+    return None
+
 
 # UI permission name -> resource instance permission codename.
 PERMISSION_CODENAMES = {
@@ -52,10 +62,3 @@ PERMISSION_CODENAMES = {
     "update": "change_resourceinstance",
     "delete": "delete_resourceinstance",
 }
-
-
-def get_rule_type_for_classname(classname):
-    for rule_type in RULE_TYPES.values():
-        if rule_type.classname == classname:
-            return rule_type
-    return None

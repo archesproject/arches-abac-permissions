@@ -1,22 +1,7 @@
 export type PermissionName = "read" | "update" | "delete";
 
-export interface LifecycleStateDefinition {
-    graphid: string;
-    lifecycle_state_id: string;
-}
-
-export interface ResourceSetDefinition {
-    resource_set_id: string;
-}
-
-export type RuleDefinition = Partial<
-    LifecycleStateDefinition & ResourceSetDefinition
->;
-
-export interface ResourceSet {
-    id: string;
-    name: string;
-}
+// Shape is owned by each rule type (see rule_types/).
+export type RuleDefinition = Record<string, unknown>;
 
 export interface RuleTypeInfo {
     key: string;
@@ -44,17 +29,6 @@ export interface Group {
     id: number;
     name: string;
     member_count: number;
-}
-
-export interface LifecycleState {
-    id: string;
-    name: string;
-}
-
-export interface ResourceModel {
-    graphid: string;
-    name: string;
-    lifecycle_states: LifecycleState[];
 }
 
 // Editable copy of a rule; `id` is null until the rule is saved.

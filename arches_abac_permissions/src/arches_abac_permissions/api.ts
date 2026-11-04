@@ -4,8 +4,6 @@ import Cookies from "js-cookie";
 import type {
     Account,
     Group,
-    ResourceModel,
-    ResourceSet,
     Rule,
     RuleTypeInfo,
 } from "@/arches_abac_permissions/types";
@@ -65,20 +63,6 @@ export const deleteRule = (ruleId: string) =>
 export const fetchRuleTypes = async () =>
     (await request<{ rule_types: RuleTypeInfo[] }>(arches.urls.abac_rule_types))
         .rule_types;
-
-export const fetchResourceModels = async () =>
-    (
-        await request<{ resource_models: ResourceModel[] }>(
-            arches.urls.abac_resource_models,
-        )
-    ).resource_models;
-
-export const fetchResourceSets = async () =>
-    (
-        await request<{ resource_sets: ResourceSet[] }>(
-            arches.urls.abac_resource_sets,
-        )
-    ).resource_sets;
 
 export const fetchGroups = async () =>
     (await request<{ groups: Group[] }>(arches.urls.abac_groups)).groups;
