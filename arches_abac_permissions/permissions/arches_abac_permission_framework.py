@@ -16,6 +16,7 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 from __future__ import annotations
 
 import logging
+from collections import defaultdict
 
 from django.contrib.auth.models import Group, User
 from django.db import DatabaseError
@@ -74,6 +75,9 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         """
         Return the permission codenames that ``user_or_group`` is granted on
         ``obj`` by the inclusion rules assigned to its groups.
+
+        A group grants a permission only if ``obj`` matches every active rule
+        of that group granting it; groups are OR'd.
         """
         from arches_abac_permissions.models import InclusionRuleGroupPermission
 
@@ -84,14 +88,26 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
             .select_related("rule")
             .prefetch_related("permissions")
         )
-        perms = set()
+        rules_by_group_perm = defaultdict(list)
         for grant in grants:
-            codenames = {permission.codename for permission in grant.permissions.all()}
-            # Skip evaluating a rule that would grant nothing new.
-            if codenames - perms and self.evaluate_rule(
-                grant.rule, lambda r: r.matches_resource(obj), default=False
-            ):
-                perms |= codenames
+            for permission in grant.permissions.all():
+                rules_by_group_perm[(grant.group_id, permission.codename)].append(
+                    grant.rule
+                )
+
+        matched = {}
+
+        def rule_matches(rule):
+            if rule.pk not in matched:
+                matched[rule.pk] = self.evaluate_rule(
+                    rule, lambda r: r.matches_resource(obj), default=False
+                )
+            return matched[rule.pk]
+
+        perms = set()
+        for (_group_id, codename), rules in rules_by_group_perm.items():
+            if codename not in perms and all(rule_matches(rule) for rule in rules):
+                perms.add(codename)
         return perms
 
     def get_abac_resources(self, user: User, permission: str):
@@ -99,27 +115,46 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         Return the resource instances on which ``user`` is granted
         ``permission`` (a codename, optionally prefixed "app_label.") by the
         inclusion rules assigned to its groups.
+
+        Within a group, the rules granting ``permission`` are AND'd; groups
+        are OR'd.
         """
-        from arches_abac_permissions.models import InclusionRule
+        from arches_abac_permissions.models import InclusionRuleGroupPermission
 
         app_label, _, codename = permission.rpartition(".")
         grant_filter = Q(
-            active=True,
-            group_permissions__group__in=self.get_groups(user),
-            group_permissions__permissions__codename=codename,
+            rule__active=True,
+            group__in=self.get_groups(user),
+            permissions__codename=codename,
         )
         if app_label:
-            grant_filter &= Q(
-                group_permissions__permissions__content_type__app_label=app_label
-            )
+            grant_filter &= Q(permissions__content_type__app_label=app_label)
 
+        rules_by_group = defaultdict(list)
+        grants = (
+            InclusionRuleGroupPermission.objects.filter(grant_filter)
+            .select_related("rule")
+            .distinct()
+        )
+        for grant in grants:
+            rules_by_group[grant.group_id].append(grant.rule)
+
+        matching_by_rule = {}
         matches = Q()
-        for rule in InclusionRule.objects.filter(grant_filter).distinct():
-            matching = self.evaluate_rule(
-                rule, lambda r: r.get_matching_resources(), default=None
-            )
-            if matching is not None:
-                matches |= Q(pk__in=matching.values("pk"))
+        for rules in rules_by_group.values():
+            group_matches = Q()
+            for rule in rules:
+                if rule.pk not in matching_by_rule:
+                    matching_by_rule[rule.pk] = self.evaluate_rule(
+                        rule, lambda r: r.get_matching_resources(), default=None
+                    )
+                matching = matching_by_rule[rule.pk]
+                # A rule that can't be evaluated matches nothing.
+                if matching is None:
+                    break
+                group_matches &= Q(pk__in=matching.values("pk"))
+            else:
+                matches |= group_matches
         if not matches:
             return ResourceInstance.objects.none()
         return ResourceInstance.objects.filter(matches)

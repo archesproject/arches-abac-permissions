@@ -1,5 +1,6 @@
 import uuid
 
+from django.contrib.auth.models import Group, Permission, User
 from django.contrib.gis.geos import GEOSGeometry
 from django.core.exceptions import ValidationError
 from django.urls import reverse
@@ -11,6 +12,10 @@ from arches.app.models.models import (
     Node,
     NodeGroup,
     TileModel,
+)
+from arches_abac_permissions.models import InclusionRuleGroupPermission
+from arches_abac_permissions.permissions.arches_abac_permission_framework import (
+    ArchesAbacPermissionFramework,
 )
 from tests.test_inclusion_rules import make_rule
 from tests.test_views import ApiTestCase
@@ -168,6 +173,33 @@ class SpatialRuleTests(SpatialTestCase):
         self.assertIn(f"abac_geom_node_{node.pk.hex}", sql)
         self.assertIn("ON geojson_geometries USING gist (geom)", sql)
         self.assertIn(f"WHERE nodeid = '{node.pk}'", sql)
+
+    def test_multiple_spatial_rules_are_anded(self):
+        group = Group.objects.create(name="Overlap readers")
+        user = User.objects.create(username="overlap_reader")
+        user.groups.add(group)
+        # Contains only the western half of the crossing line, not "inside".
+        west = {
+            "type": "Polygon",
+            "coordinates": [[[-10, 0], [2, 0], [2, 10], [-10, 10], [-10, 0]]],
+        }
+        for rule in (self.make_spatial_rule(), self.make_spatial_rule(geometry=west)):
+            grant = InclusionRuleGroupPermission.objects.create(rule=rule, group=group)
+            grant.permissions.add(
+                Permission.objects.get(codename="view_resourceinstance")
+            )
+
+        framework = ArchesAbacPermissionFramework()
+        self.assertEqual(
+            set(framework.get_abac_resources(user, "models.view_resourceinstance")),
+            {self.crossing},
+        )
+        self.assertIn(
+            "view_resourceinstance", framework.get_abac_perms(group, self.crossing)
+        )
+        self.assertNotIn(
+            "view_resourceinstance", framework.get_abac_perms(group, self.inside)
+        )
 
 
 class SpatialApiTests(SpatialTestCase):

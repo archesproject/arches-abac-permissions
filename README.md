@@ -127,7 +127,15 @@ An inclusion rule has:
 - a **definition**, a JSON object of settings specific to the rule class;
 - one or more **group permissions**, each pairing a Django group with the permissions its members get on matching resources.
 
-When Arches checks a user's permissions on a single resource instance (viewing its report, opening it in the editor, deleting it), the framework adds the permissions from every rule that is assigned to one of the user's groups and that matches the resource.
+When Arches checks a user's permissions on a single resource instance (viewing its report, opening it in the editor, deleting it), the framework adds each permission that one of the user's groups is granted by rules matching the resource.
+
+### Combining rules
+
+Rules assigned to the same group are **AND'd per permission**: a group grants a permission (Read, Update or Delete) on a resource only if the resource matches **every** active rule that grants that permission to the group. A rule restricts only the permissions it grants. Groups are OR'd: a user gets a permission if any of their groups grants it.
+
+For example, if a group has a spatial rule granting Read and Update, and a lifecycle state rule granting Read, its members can read resources that are both in the area and in the state, and update resources in the area regardless of state. To grant access to resources matching _either_ of two rules, assign them to different groups.
+
+A rule that can't be evaluated (including _Search_ and _QuerySet_ rules) matches nothing, so the group grants none of that rule's permissions.
 
 Things to be aware of:
 
@@ -233,7 +241,7 @@ If the rule has no effect, check that:
 - the group permission has at least one permission chosen;
 - the user has the `read_nodegroup` permission;
 - `RULE_LOCATIONS` is defined in your settings. If it's missing, loading the rule fails with `AttributeError: 'Settings' object has no attribute 'RULE_LOCATIONS'`;
-- the logs don't show `Inclusion rule ... could not be evaluated`. A rule that can't be evaluated, for example because its graph was deleted, is treated as matching nothing, so it grants nothing but doesn't break other permissions.
+- the logs don't show `Inclusion rule ... could not be evaluated`. A rule that can't be evaluated, for example because its graph was deleted, is treated as matching nothing. Its group then grants none of that rule's permissions, but other permissions are unaffected.
 
 ## Creating a resource set rule
 

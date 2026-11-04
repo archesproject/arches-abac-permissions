@@ -1,4 +1,5 @@
 import uuid
+from unittest.mock import patch
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
@@ -343,7 +344,7 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
             set(filtered), {self.matching, self.also_matching, self.non_matching}
         )
 
-    def test_filter_resource_queryset_ignores_unevaluated_rules(self):
+    def test_unevaluated_rule_restricts_its_group(self):
         self.grant(
             make_rule(modulename="search_rule.py", classname="SearchRule"),
             "view_resourceinstance",
@@ -351,9 +352,89 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
         filtered = self.framework.filter_resource_queryset(
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
+        self.assertFalse(filtered.exists())
+        self.assertNotIn(
+            "view_resourceinstance", self.framework.get_perms(self.user, self.matching)
+        )
+
+    # Rules granting the same permission to a group are AND'd.
+    def test_rules_granting_same_permission_are_anded(self):
+        self.grant(
+            self.make_lifecycle_rule(graph=self.other_graph), "view_resourceinstance"
+        )
+        self.assertNotIn(
+            "view_resourceinstance", self.framework.get_perms(self.user, self.matching)
+        )
+        filtered = self.framework.filter_resource_queryset(
+            self.user, ResourceInstance.objects.all()
+        )
+        self.assertFalse(filtered.exists())
+
+    def test_anded_rules_grant_resources_matching_all(self):
+        narrowing_rule = make_rule(
+            modulename="queryset_rule.py", classname="QuerySetRule", definition={}
+        )
+        self.grant(narrowing_rule, "view_resourceinstance")
+        only_matching = ResourceInstance.objects.filter(pk=self.matching.pk)
+        with (
+            patch.object(
+                QuerySetRule, "get_matching_resources", return_value=only_matching
+            ),
+            patch.object(
+                QuerySetRule,
+                "matches_resource",
+                side_effect=lambda rule, resource: resource == self.matching,
+            ),
+        ):
+            filtered = self.framework.filter_resource_queryset(
+                self.user, ResourceInstance.objects.all()
+            )
+            self.assertEqual(set(filtered), {self.matching})
+            self.assertIn(
+                "view_resourceinstance",
+                self.framework.get_perms(self.user, self.matching),
+            )
+            self.assertNotIn(
+                "view_resourceinstance",
+                self.framework.get_perms(self.user, self.also_matching),
+            )
+
+    def test_rules_only_restrict_the_permissions_they_grant(self):
+        self.grant(self.make_lifecycle_rule(), "change_resourceinstance")
+        self.grant(
+            self.make_lifecycle_rule(graph=self.other_graph), "view_resourceinstance"
+        )
+        perms = self.framework.get_perms(self.user, self.matching)
+        self.assertIn("change_resourceinstance", perms)
+        self.assertNotIn("view_resourceinstance", perms)
+        filtered = self.framework.filter_resource_queryset(
+            self.user,
+            ResourceInstance.objects.all(),
+            permission="models.change_resourceinstance",
+        )
         self.assertEqual(set(filtered), {self.matching, self.also_matching})
 
-    # A rule that cannot be evaluated matches nothing and breaks nothing.
+    def test_groups_are_ored(self):
+        other_group = Group.objects.create(name="Other graph readers")
+        self.user.groups.add(other_group)
+        self.grant(
+            self.make_lifecycle_rule(graph=self.other_graph),
+            "view_resourceinstance",
+            group=other_group,
+        )
+        filtered = self.framework.filter_resource_queryset(
+            self.user, ResourceInstance.objects.all()
+        )
+        self.assertEqual(
+            set(filtered),
+            {self.matching, self.also_matching, self.other_graph_active},
+        )
+        self.assertIn(
+            "view_resourceinstance",
+            self.framework.get_perms(self.user, self.other_graph_active),
+        )
+
+    # A rule that cannot be evaluated matches nothing and breaks nothing else.
     framework_logger = (
         "arches_abac_permissions.permissions.arches_abac_permission_framework"
     )
@@ -377,15 +458,25 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
                 self.assertIn("view_resourceinstance", perms)
                 self.assertNotIn("change_resourceinstance", perms)
 
-    def test_filter_resource_queryset_ignores_broken_rule(self):
+    def test_filter_resource_queryset_broken_rule_matches_nothing(self):
         for rule in self.broken_rules():
             with self.subTest(rule=rule.classname):
-                self.grant(rule, "view_resourceinstance")
+                self.grant(rule, "change_resourceinstance")
                 with self.assertLogs(self.framework_logger, "ERROR"):
                     filtered = self.framework.filter_resource_queryset(
-                        self.user, ResourceInstance.objects.filter(graph=self.graph)
+                        self.user,
+                        ResourceInstance.objects.filter(graph=self.graph),
+                        permission="models.change_resourceinstance",
                     )
-                self.assertEqual(set(filtered), {self.matching, self.also_matching})
+                self.assertFalse(filtered.exists())
+                self.assertEqual(
+                    set(
+                        self.framework.filter_resource_queryset(
+                            self.user, ResourceInstance.objects.filter(graph=self.graph)
+                        )
+                    ),
+                    {self.matching, self.also_matching},
+                )
 
 
 class InclusionRuleValidationTests(LifecycleTestCase):
