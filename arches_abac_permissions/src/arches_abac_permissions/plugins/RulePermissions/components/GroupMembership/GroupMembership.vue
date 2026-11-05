@@ -11,23 +11,26 @@ import { useToast } from "openvue/usetoast";
 
 import {
     changeMembership,
-    fetchAccounts,
+    fetchUserDetails,
+    fetchUsers,
 } from "@/arches_abac_permissions/api.ts";
-import AddAccountsDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddAccountsDialog/AddAccountsDialog.vue";
+import AddUsersDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddUsersDialog/AddUsersDialog.vue";
+import GroupTags from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupTags/GroupTags.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
     ERROR,
 } from "@/arches_abac_permissions/constants.ts";
 import {
-    accountDisplayName,
-    accountMatchesFilter,
+    userDisplayName,
+    userMatchesFilter,
     groupHoldings,
 } from "@/arches_abac_permissions/utils.ts";
 
-import type { Account, Group } from "@/arches_abac_permissions/types";
+import type { Group, User, UserDetails } from "@/arches_abac_permissions/types";
 
 const UNGROUPED = "none";
 const MAX_VISIBLE_GROUPS = 2;
+const PENDING_VALUE = "—";
 
 const { $gettext } = useGettext();
 const noGroupsLabel = $gettext("<no groups>");
@@ -39,77 +42,89 @@ const emit = defineEmits<{
     (e: "delete-group", group: Group): void;
 }>();
 
-const accounts = ref<Account[]>([]);
+const users = ref<User[]>([]);
 const isLoading = ref(true);
 const isSaving = ref(false);
 const groupFilter = ref<number | typeof UNGROUPED | null>(null);
 const filter = ref("");
 const checkedIds = ref<number[]>([]);
 const activeId = ref<number | null>(null);
+const activeUserDetails = ref<UserDetails | null>(null);
 const isBulkEditing = ref(false);
 const pendingGroup = ref<number | null>(null);
-const showAddAccounts = ref(false);
-// Hidden until the comp's "Add Account" behaviour is defined.
-const ADD_ACCOUNT_ENABLED = false;
+const showAddUsers = ref(false);
+// Hidden until the comp's "Add User" behaviour is defined.
+const ADD_USER_ENABLED = false;
 
 const groupsById = computed(
     () => new Map(props.groups.map((group) => [group.id, group])),
 );
 
-function groupNames(account: Account): string[] {
-    return account.groups
+function groupNames(user: User): string[] {
+    return user.groups
         .map((id) => groupsById.value.get(id)?.name)
         .filter((name): name is string => Boolean(name));
 }
 
 const memberCounts = computed(
     () =>
-        new Map(groupHoldings(accounts.value).map((h) => [h.groupId, h.count])),
+        new Map(
+            groupHoldings(users.value).map((holding) => [
+                holding.groupId,
+                holding.count,
+            ]),
+        ),
 );
 const ungroupedCount = computed(
-    () =>
-        accounts.value.filter((account) => account.groups.length === 0).length,
+    () => users.value.filter((user) => user.groups.length === 0).length,
 );
 
-const visibleAccounts = computed(() =>
-    accounts.value.filter((account) => {
-        if (groupFilter.value === UNGROUPED && account.groups.length) {
+const visibleUsers = computed(() =>
+    users.value.filter((user) => {
+        if (groupFilter.value === UNGROUPED && user.groups.length) {
             return false;
         }
         if (
             typeof groupFilter.value === "number" &&
-            !account.groups.includes(groupFilter.value)
+            !user.groups.includes(groupFilter.value)
         ) {
             return false;
         }
-        return accountMatchesFilter(account, filter.value, groupNames(account));
+        return userMatchesFilter(user, filter.value, groupNames(user));
     }),
 );
 
-const activeAccount = computed(
-    () => accounts.value.find((a) => a.id === activeId.value) ?? null,
+const activeUser = computed(
+    () => users.value.find((user) => user.id === activeId.value) ?? null,
 );
-const checkedAccounts = computed(() =>
-    accounts.value.filter((a) => checkedIds.value.includes(a.id)),
+const checkedUsers = computed(() =>
+    users.value.filter((user) => checkedIds.value.includes(user.id)),
 );
-const editedAccounts = computed(() =>
+const editedUsers = computed(() =>
     isBulkEditing.value
-        ? checkedAccounts.value
-        : activeAccount.value
-          ? [activeAccount.value]
+        ? checkedUsers.value
+        : activeUser.value
+          ? [activeUser.value]
           : [],
 );
 
 const holdings = computed(() =>
-    groupHoldings(editedAccounts.value)
-        .map((h) => ({ ...h, group: groupsById.value.get(h.groupId) }))
-        .filter((h) => h.group !== undefined)
-        .sort((a, b) => a.group!.name.localeCompare(b.group!.name)),
+    groupHoldings(editedUsers.value)
+        .map((holding) => ({
+            ...holding,
+            group: groupsById.value.get(holding.groupId),
+        }))
+        .filter((holding) => holding.group !== undefined)
+        .sort((first, second) =>
+            first.group!.name.localeCompare(second.group!.name),
+        ),
 );
 const addableGroups = computed(() => {
-    const total = editedAccounts.value.length;
+    const total = editedUsers.value.length;
     const full = new Set(
-        holdings.value.filter((h) => h.count === total).map((h) => h.groupId),
+        holdings.value
+            .filter((holding) => holding.count === total)
+            .map((holding) => holding.groupId),
     );
     return props.groups.filter((group) => !full.has(group.id));
 });
@@ -118,17 +133,17 @@ function toggleFilter(value: number | typeof UNGROUPED): void {
     groupFilter.value = groupFilter.value === value ? null : value;
 }
 
-function toggleChecked(account: Account): void {
-    checkedIds.value = checkedIds.value.includes(account.id)
-        ? checkedIds.value.filter((id) => id !== account.id)
-        : [...checkedIds.value, account.id];
+function toggleChecked(user: User): void {
+    checkedIds.value = checkedIds.value.includes(user.id)
+        ? checkedIds.value.filter((id) => id !== user.id)
+        : [...checkedIds.value, user.id];
     if (checkedIds.value.length === 0) {
         isBulkEditing.value = false;
     }
 }
 
 function selectAllVisible(): void {
-    checkedIds.value = visibleAccounts.value.map((a) => a.id);
+    checkedIds.value = visibleUsers.value.map((user) => user.id);
 }
 
 function clearChecked(): void {
@@ -136,8 +151,8 @@ function clearChecked(): void {
     isBulkEditing.value = false;
 }
 
-function openAccount(account: Account): void {
-    activeId.value = account.id;
+function openUser(user: User): void {
+    activeId.value = user.id;
     isBulkEditing.value = false;
 }
 
@@ -147,10 +162,10 @@ function openBulkEdit(): void {
 }
 
 async function apply(add: number[], remove: number[]): Promise<void> {
-    const ids = editedAccounts.value.map((a) => a.id);
+    const ids = editedUsers.value.map((user) => user.id);
     isSaving.value = true;
     try {
-        mergeAccounts(await changeMembership(ids, add, remove));
+        mergeUsers(await changeMembership(ids, add, remove));
     } catch (error) {
         showError($gettext("Unable to update group membership"), error);
     } finally {
@@ -159,9 +174,9 @@ async function apply(add: number[], remove: number[]): Promise<void> {
     }
 }
 
-function mergeAccounts(updated: Account[]): void {
-    const byId = new Map(updated.map((a) => [a.id, a]));
-    accounts.value = accounts.value.map((a) => byId.get(a.id) ?? a);
+function mergeUsers(updated: User[]): void {
+    const byId = new Map(updated.map((user) => [user.id, user]));
+    users.value = users.value.map((user) => byId.get(user.id) ?? user);
 }
 
 function showError(summary: string, error: unknown): void {
@@ -173,24 +188,42 @@ function showError(summary: string, error: unknown): void {
     });
 }
 
-function initials(account: Account): string {
-    const letters = `${account.first_name.charAt(0)}${account.last_name.charAt(0)}`;
-    return (letters || account.username.charAt(0)).toUpperCase();
+function initials(user: User): string {
+    const letters = `${user.first_name.charAt(0)}${user.last_name.charAt(0)}`;
+    return (letters || user.username.charAt(0)).toUpperCase();
 }
 
 function formatDate(value: string | null): string {
     return value ? new Date(value).toLocaleString() : $gettext("Never");
 }
 
-watchEffect(loadAccounts);
+watchEffect(loadUsers);
+watchEffect(loadActiveUserDetails);
 
-async function loadAccounts(): Promise<void> {
+async function loadUsers(): Promise<void> {
     try {
-        accounts.value = await fetchAccounts();
+        users.value = await fetchUsers();
     } catch (error) {
-        showError($gettext("Unable to load accounts"), error);
+        showError($gettext("Unable to load users"), error);
     } finally {
         isLoading.value = false;
+    }
+}
+
+// Contact details and dates are fetched only for the open user.
+async function loadActiveUserDetails(): Promise<void> {
+    const userId = activeId.value;
+    activeUserDetails.value = null;
+    if (userId === null) {
+        return;
+    }
+    try {
+        const details = await fetchUserDetails(userId);
+        if (activeId.value === userId) {
+            activeUserDetails.value = details;
+        }
+    } catch (error) {
+        showError($gettext("Unable to load user details"), error);
     }
 }
 </script>
@@ -198,7 +231,7 @@ async function loadAccounts(): Promise<void> {
 <template>
     <div
         class="membership-columns"
-        :class="{ 'with-editor': editedAccounts.length > 0 }"
+        :class="{ 'with-editor': editedUsers.length > 0 }"
     >
         <section
             class="column"
@@ -248,11 +281,16 @@ async function loadAccounts(): Promise<void> {
                             aria-hidden="true"
                         ></i>
                         <span class="item-name">{{ group.name }}</span>
+                        <GroupTags
+                            :is-built-in="group.is_built_in"
+                            :is-public="group.is_public"
+                        />
                         <span class="group-count">{{
                             memberCounts.get(group.id) ?? 0
                         }}</span>
                     </button>
                     <button
+                        v-if="!group.is_built_in"
                         type="button"
                         class="row-delete"
                         :title="$gettext('Delete group')"
@@ -294,7 +332,7 @@ async function loadAccounts(): Promise<void> {
 
         <section
             class="column"
-            :aria-label="$gettext('Accounts')"
+            :aria-label="$gettext('Users')"
         >
             <header class="column-header">
                 <h2 class="column-title">
@@ -302,11 +340,11 @@ async function loadAccounts(): Promise<void> {
                         class="pi pi-user"
                         aria-hidden="true"
                     ></i>
-                    {{ $gettext("Accounts") }}
+                    {{ $gettext("Users") }}
                     <span class="count">{{
                         groupFilter !== null || filter
-                            ? `${visibleAccounts.length} / ${accounts.length}`
-                            : accounts.length
+                            ? `${visibleUsers.length} / ${users.length}`
+                            : users.length
                     }}</span>
                 </h2>
                 <InputText
@@ -314,13 +352,13 @@ async function loadAccounts(): Promise<void> {
                     type="search"
                     class="header-filter"
                     :placeholder="$gettext('Filter…')"
-                    :aria-label="$gettext('Filter accounts')"
+                    :aria-label="$gettext('Filter users')"
                 />
                 <Button
-                    v-if="ADD_ACCOUNT_ENABLED"
+                    v-if="ADD_USER_ENABLED"
                     icon="pi pi-plus"
-                    :label="$gettext('Add Account')"
-                    @click="showAddAccounts = true"
+                    :label="$gettext('Add User')"
+                    @click="showAddUsers = true"
                 />
             </header>
             <div
@@ -332,10 +370,10 @@ async function loadAccounts(): Promise<void> {
             </div>
             <div
                 v-else
-                class="account-body"
+                class="user-body"
             >
                 <div
-                    v-if="checkedIds.length && visibleAccounts.length"
+                    v-if="checkedIds.length && visibleUsers.length"
                     class="selection-bar"
                     role="group"
                     :aria-label="$gettext('Bulk actions')"
@@ -347,8 +385,8 @@ async function loadAccounts(): Promise<void> {
                     <span class="selection-count">
                         {{
                             checkedIds.length === 1
-                                ? $gettext("1 account selected")
-                                : $gettext("%{count} accounts selected", {
+                                ? $gettext("1 user selected")
+                                : $gettext("%{count} users selected", {
                                       count: String(checkedIds.length),
                                   })
                         }}
@@ -377,85 +415,85 @@ async function loadAccounts(): Promise<void> {
                 </div>
                 <ul class="item-list">
                     <li
-                        v-if="visibleAccounts.length === 0"
+                        v-if="visibleUsers.length === 0"
                         class="empty"
                     >
-                        {{ $gettext("No accounts match") }}
+                        {{ $gettext("No users match") }}
                     </li>
                     <li
-                        v-for="account in visibleAccounts"
-                        :key="account.id"
-                        class="item-row account-row"
+                        v-for="user in visibleUsers"
+                        :key="user.id"
+                        class="item-row user-row"
                         :class="{
-                            selected: account.id === activeId,
-                            checked: checkedIds.includes(account.id),
+                            selected: user.id === activeId,
+                            checked: checkedIds.includes(user.id),
                         }"
                     >
                         <Checkbox
-                            class="account-check"
+                            class="user-check"
                             :binary="true"
-                            :model-value="checkedIds.includes(account.id)"
+                            :model-value="checkedIds.includes(user.id)"
                             :aria-label="
                                 $gettext('Select %{name}', {
-                                    name: accountDisplayName(account),
+                                    name: userDisplayName(user),
                                 })
                             "
-                            @update:model-value="toggleChecked(account)"
+                            @update:model-value="toggleChecked(user)"
                         />
                         <button
                             type="button"
                             class="item-select stacked"
                             :aria-current="
-                                account.id === activeId ? 'true' : undefined
+                                user.id === activeId ? 'true' : undefined
                             "
-                            @click="openAccount(account)"
+                            @click="openUser(user)"
                         >
                             <span class="line">
-                                <span class="item-name account-name">{{
-                                    accountDisplayName(account)
+                                <span class="item-name user-name">{{
+                                    userDisplayName(user)
                                 }}</span>
+                                <GroupTags :is-public="user.is_public" />
                                 <span
                                     class="status-badge"
                                     :class="{
-                                        'status-active': account.is_active,
+                                        'status-active': user.is_active,
                                     }"
                                 >
                                     {{
-                                        account.is_active
+                                        user.is_active
                                             ? $gettext("Active")
                                             : $gettext("Inactive")
                                     }}
                                 </span>
                             </span>
-                            <span class="line account-username"
-                                >@{{ account.username }}</span
+                            <span class="line user-handle"
+                                >@{{ user.username }}</span
                             >
                             <span class="line">
                                 <span
-                                    class="account-groups"
+                                    class="user-groups"
                                     :class="{
-                                        none: account.groups.length === 0,
+                                        none: user.groups.length === 0,
                                     }"
                                 >
                                     {{
-                                        account.groups.length === 0
+                                        user.groups.length === 0
                                             ? noGroupsLabel
-                                            : groupNames(account)
+                                            : groupNames(user)
                                                   .slice(0, MAX_VISIBLE_GROUPS)
                                                   .join(", ")
                                     }}
                                 </span>
                                 <span
                                     v-if="
-                                        account.groups.length >
-                                        MAX_VISIBLE_GROUPS
+                                        user.groups.length > MAX_VISIBLE_GROUPS
                                     "
                                     class="more-pill"
                                 >
                                     {{
                                         $gettext("+%{count} more", {
                                             count: String(
-                                                account.groups.length -
+                                                user.groups.length -
                                                     MAX_VISIBLE_GROUPS,
                                             ),
                                         })
@@ -469,7 +507,7 @@ async function loadAccounts(): Promise<void> {
         </section>
 
         <section
-            v-if="editedAccounts.length > 0"
+            v-if="editedUsers.length > 0"
             class="column editor-column"
             :aria-label="$gettext('Group Membership')"
         >
@@ -482,47 +520,50 @@ async function loadAccounts(): Promise<void> {
                     <span class="truncate">
                         <template v-if="isBulkEditing">
                             {{
-                                $gettext("%{count} Accounts Selected", {
-                                    count: String(checkedAccounts.length),
+                                $gettext("%{count} Users Selected", {
+                                    count: String(checkedUsers.length),
                                 })
                             }}
                         </template>
-                        <template v-else-if="activeAccount">
-                            {{ accountDisplayName(activeAccount) }}
+                        <template v-else-if="activeUser">
+                            {{ userDisplayName(activeUser) }}
                         </template>
                     </span>
                 </h2>
             </header>
             <div class="editor">
-                <template v-if="activeAccount && !isBulkEditing">
+                <template v-if="activeUser && !isBulkEditing">
                     <div class="hero">
                         <div class="hero-head">
                             <span
                                 class="avatar"
                                 aria-hidden="true"
-                                >{{ initials(activeAccount) }}</span
+                                >{{ initials(activeUser) }}</span
                             >
                             <div class="hero-text">
                                 <span class="line">
                                     <span class="hero-name">{{
-                                        accountDisplayName(activeAccount)
+                                        userDisplayName(activeUser)
                                     }}</span>
+                                    <GroupTags
+                                        :is-public="activeUser.is_public"
+                                    />
                                     <span
                                         class="status-badge"
                                         :class="{
                                             'status-active':
-                                                activeAccount.is_active,
+                                                activeUser.is_active,
                                         }"
                                     >
                                         {{
-                                            activeAccount.is_active
+                                            activeUser.is_active
                                                 ? $gettext("Active")
                                                 : $gettext("Inactive")
                                         }}
                                     </span>
                                 </span>
                                 <span
-                                    v-if="activeAccount.is_superuser"
+                                    v-if="activeUser.is_superuser"
                                     class="hero-sub"
                                     >{{ $gettext("Superuser") }}</span
                                 >
@@ -532,7 +573,13 @@ async function loadAccounts(): Promise<void> {
                             <div>
                                 <dt>{{ $gettext("Created") }}</dt>
                                 <dd>
-                                    {{ formatDate(activeAccount.date_joined) }}
+                                    {{
+                                        activeUserDetails
+                                            ? formatDate(
+                                                  activeUserDetails.date_joined,
+                                              )
+                                            : PENDING_VALUE
+                                    }}
                                 </dd>
                             </div>
                             <span
@@ -544,11 +591,11 @@ async function loadAccounts(): Promise<void> {
                                 <dt>{{ $gettext("Last Login") }}</dt>
                                 <dd>
                                     {{
-                                        activeAccount.last_login
+                                        activeUserDetails
                                             ? formatDate(
-                                                  activeAccount.last_login,
+                                                  activeUserDetails.last_login,
                                               )
-                                            : $gettext("Never")
+                                            : PENDING_VALUE
                                     }}
                                 </dd>
                             </div>
@@ -557,20 +604,22 @@ async function loadAccounts(): Promise<void> {
                 </template>
                 <div class="editor-body">
                     <dl
-                        v-if="activeAccount && !isBulkEditing"
+                        v-if="activeUser && !isBulkEditing"
                         class="profile"
                     >
                         <div>
                             <dt class="section-label">
                                 {{ $gettext("Username") }}
                             </dt>
-                            <dd class="mono">{{ activeAccount.username }}</dd>
+                            <dd class="mono">{{ activeUser.username }}</dd>
                         </div>
                         <div>
                             <dt class="section-label">
                                 {{ $gettext("Email") }}
                             </dt>
-                            <dd>{{ activeAccount.email || "—" }}</dd>
+                            <dd>
+                                {{ activeUserDetails?.email || PENDING_VALUE }}
+                            </dd>
                         </div>
                     </dl>
                     <div
@@ -584,8 +633,8 @@ async function loadAccounts(): Promise<void> {
                         <span>
                             {{ $gettext("Editing group membership for") }}
                             <strong>{{
-                                $gettext("%{count} accounts", {
-                                    count: String(editedAccounts.length),
+                                $gettext("%{count} users", {
+                                    count: String(editedUsers.length),
                                 })
                             }}</strong>
                         </span>
@@ -604,7 +653,7 @@ async function loadAccounts(): Promise<void> {
                         >
                             {{
                                 $gettext(
-                                    "Groups at reduced opacity are not held by all selected accounts.",
+                                    "Groups at reduced opacity are not held by all selected users.",
                                 )
                             }}
                         </p>
@@ -616,7 +665,7 @@ async function loadAccounts(): Promise<void> {
                                 {{
                                     isBulkEditing
                                         ? $gettext(
-                                              "No groups assigned to any selected account",
+                                              "No groups assigned to any selected user",
                                           )
                                         : $gettext("No groups assigned")
                                 }}
@@ -626,8 +675,7 @@ async function loadAccounts(): Promise<void> {
                                 :key="holding.groupId"
                                 class="group-tag"
                                 :class="{
-                                    partial:
-                                        holding.count < editedAccounts.length,
+                                    partial: holding.count < editedUsers.length,
                                 }"
                             >
                                 {{ holding.group?.name }}
@@ -636,7 +684,7 @@ async function loadAccounts(): Promise<void> {
                                     class="tag-count"
                                 >
                                     ({{ holding.count }}/{{
-                                        editedAccounts.length
+                                        editedUsers.length
                                     }})
                                 </span>
                                 <button
@@ -679,15 +727,15 @@ async function loadAccounts(): Promise<void> {
                 </div>
             </div>
         </section>
-        <AddAccountsDialog
-            v-if="ADD_ACCOUNT_ENABLED"
-            v-model:visible="showAddAccounts"
+        <AddUsersDialog
+            v-if="ADD_USER_ENABLED"
+            v-model:visible="showAddUsers"
             :groups="groups"
-            :accounts="accounts"
+            :users="users"
             :initial-group-id="
                 typeof groupFilter === 'number' ? groupFilter : null
             "
-            @updated="mergeAccounts"
+            @updated="mergeUsers"
         />
     </div>
 </template>
@@ -742,7 +790,7 @@ async function loadAccounts(): Promise<void> {
     flex: 1;
 }
 
-.account-body {
+.user-body {
     flex: 1;
     min-block-size: 0;
     display: flex;
@@ -750,7 +798,7 @@ async function loadAccounts(): Promise<void> {
     overflow-y: auto;
 }
 
-.account-body .item-list {
+.user-body .item-list {
     overflow: visible;
 }
 
@@ -843,12 +891,12 @@ async function loadAccounts(): Promise<void> {
     white-space: nowrap;
 }
 
-.account-row {
+.user-row {
     align-items: flex-start;
 }
 
 /* Centre the checkbox on the fixed-height first (name) line. */
-.account-check {
+.user-check {
     margin-block: 1.4rem 0;
     margin-inline: 1.2rem 0;
 }
@@ -872,12 +920,12 @@ async function loadAccounts(): Promise<void> {
     min-inline-size: 0;
 }
 
-.account-name {
+.user-name {
     flex: 0 1 auto;
     font-size: 1.35rem;
 }
 
-.account-username {
+.user-handle {
     font-size: 1.15rem;
     font-weight: 600;
     color: color-mix(
@@ -887,7 +935,7 @@ async function loadAccounts(): Promise<void> {
     );
 }
 
-.account-groups {
+.user-groups {
     font-size: 1.2rem;
     color: var(--p-abac-text-secondary);
     overflow: hidden;
@@ -895,7 +943,7 @@ async function loadAccounts(): Promise<void> {
     white-space: nowrap;
 }
 
-.account-groups.none {
+.user-groups.none {
     font-style: italic;
 }
 

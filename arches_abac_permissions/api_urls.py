@@ -3,6 +3,7 @@ from django.urls import path
 from arches_abac_permissions.membership_views import (
     UserGroupMembershipView,
     UsersView,
+    UserView,
 )
 from arches_abac_permissions.views import (
     GroupsView,
@@ -29,6 +30,7 @@ urlpatterns = [
     path("api/abac/groups", GroupsView.as_view(), name="abac_groups"),
     path("api/abac/groups/<int:group_id>", GroupView.as_view(), name="abac_group"),
     path("api/abac/users", UsersView.as_view(), name="abac_users"),
+    path("api/abac/users/<int:user_id>", UserView.as_view(), name="abac_user"),
     path(
         "api/abac/users/group_membership",
         UserGroupMembershipView.as_view(),

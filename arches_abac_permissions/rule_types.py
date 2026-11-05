@@ -49,12 +49,32 @@ def get_rule_types():
     return rule_types
 
 
-def get_rule_type_for_classname(classname):
+def get_rule_type_for_rule(modulename, classname):
     for rule_type in get_rule_types().values():
-        if rule_type.classname == classname:
+        if (rule_type.modulename, rule_type.classname) == (modulename, classname):
             return rule_type
     return None
 
+
+# Groups created by Arches core migrations; Arches looks some up by name.
+BUILT_IN_GROUP_NAMES = frozenset(
+    {
+        "Application Administrator",
+        "Crowdsource Editor",
+        "Graph Editor",
+        "Guest",
+        "Mobile Project Administrator",
+        "RDM Administrator",
+        "Resource Editor",
+        "Resource Exporter",
+        "Resource Reviewer",
+        "System Administrator",
+    }
+)
+
+# Logged-out visitors are this user (SetAnonymousUser), and it belongs to Guest.
+ANONYMOUS_USERNAME = "anonymous"
+PUBLIC_GROUP_NAME = "Guest"
 
 # UI permission name -> resource instance permission codename.
 PERMISSION_CODENAMES = {

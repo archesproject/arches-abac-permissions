@@ -63,6 +63,7 @@ class AccessTests(ApiTestCase):
             reverse("abac_groups"),
             reverse("abac_group", args=[self.group.pk]),
             reverse("abac_users"),
+            reverse("abac_user", args=[self.user.pk]),
             reverse("abac_user_group_membership"),
         ]
 
@@ -102,6 +103,18 @@ class RuleApiTests(ApiTestCase):
     def test_list_excludes_unsupported_rule_types(self):
         make_rule(modulename="search_rule.py", classname="SearchRule")
         self.assertEqual(self.client.get(reverse("abac_rules")).json()["rules"], [])
+
+    def test_rule_type_matches_module_and_class(self):
+        make_rule(modulename="other_rule.py", classname="LifecycleStateRule")
+        self.assertEqual(self.client.get(reverse("abac_rules")).json()["rules"], [])
+
+    def test_unsupported_rule_types_not_editable(self):
+        rule = make_rule(modulename="search_rule.py", classname="SearchRule")
+        url = reverse("abac_rule", args=[rule.pk])
+        self.assertEqual(self.send("get", url).status_code, 404)
+        self.assertEqual(self.send("put", url, self.payload()).status_code, 404)
+        self.assertEqual(self.send("delete", url).status_code, 404)
+        self.assertTrue(InclusionRule.objects.filter(pk=rule.pk).exists())
 
     def test_update_replaces_grants(self):
         other = Group.objects.create(name="Other")
@@ -229,6 +242,34 @@ class GroupApiTests(ApiTestCase):
         self.assertEqual(self.send("post", url, {"name": "x" * 151}).status_code, 400)
         self.assertEqual(self.send("post", url, {"name": "Reviewers"}).status_code, 409)
 
+    def test_list_flags_and_counts(self):
+        self.group.user_set.add(self.user, self.superuser)
+        groups = {
+            g["name"]: g
+            for g in self.send("get", reverse("abac_groups")).json()["groups"]
+        }
+        self.assertEqual(groups["Reviewers"]["member_count"], 2)
+        self.assertFalse(groups["Reviewers"]["is_built_in"])
+        self.assertFalse(groups["Reviewers"]["is_public"])
+        self.assertTrue(groups["Guest"]["is_built_in"])
+        self.assertTrue(groups["Guest"]["is_public"])
+
+    def test_group_with_anonymous_is_public(self):
+        anonymous, _created = User.objects.get_or_create(username="anonymous")
+        self.group.user_set.add(anonymous)
+        groups = {
+            g["name"]: g
+            for g in self.send("get", reverse("abac_groups")).json()["groups"]
+        }
+        self.assertTrue(groups["Reviewers"]["is_public"])
+
+    def test_delete_built_in_group_refused(self):
+        guest = Group.objects.get(name="Guest")
+        guest.user_set.clear()
+        url = reverse("abac_group", args=[guest.pk])
+        self.assertEqual(self.send("delete", url).status_code, 409)
+        self.assertTrue(Group.objects.filter(pk=guest.pk).exists())
+
     def test_delete_removes_grants(self):
         self.create_rule()
         url = reverse("abac_group", args=[self.group.pk])
@@ -251,6 +292,18 @@ class MembershipApiTests(ApiTestCase):
         users = {u["username"]: u for u in response.json()["users"]}
         self.assertEqual(users["plain"]["groups"], [self.group.pk])
         self.assertNotIn("password", users["plain"])
+        self.assertNotIn("email", users["plain"])
+        self.assertFalse(users["plain"]["is_public"])
+
+    def test_user_details(self):
+        self.user.email = "plain@example.org"
+        self.user.save()
+        response = self.send("get", reverse("abac_user", args=[self.user.pk]))
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()["email"], "plain@example.org")
+        self.assertNotIn("password", response.json())
+        missing = reverse("abac_user", args=[999999])
+        self.assertEqual(self.send("get", missing).status_code, 404)
 
     def test_bulk_add_and_remove(self):
         other = Group.objects.create(name="Other")

@@ -5,6 +5,7 @@ from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, transaction
+from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
 
@@ -14,8 +15,11 @@ from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches.app.views.api import APIBase
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.rule_types import (
+    ANONYMOUS_USERNAME,
+    BUILT_IN_GROUP_NAMES,
     PERMISSION_CODENAMES,
-    get_rule_type_for_classname,
+    PUBLIC_GROUP_NAME,
+    get_rule_type_for_rule,
     get_rule_types,
 )
 
@@ -53,7 +57,7 @@ class SuperuserAPIView(APIBase):
 
 
 def serialize_rule(rule):
-    rule_type = get_rule_type_for_classname(rule.classname)
+    rule_type = get_rule_type_for_rule(rule.modulename, rule.classname)
     group_permissions = []
     for grant in rule.group_permissions.all():
         codenames = {permission.codename for permission in grant.permissions.all()}
@@ -73,17 +77,20 @@ def serialize_rule(rule):
         "name": rule.name,
         "description": rule.description,
         "active": rule.active,
-        "rule_type": rule_type.key if rule_type else None,
+        "rule_type": rule_type.key,
         "definition": rule.definition,
         "group_permissions": group_permissions,
     }
 
 
 def get_rules_queryset():
-    classnames = [rule_type.classname for rule_type in get_rule_types().values()]
-    return InclusionRule.objects.filter(classname__in=classnames).prefetch_related(
+    """Rules whose class declares a rule type; any other row is misconfigured."""
+    typed = Q(pk__in=[])
+    for rule_type in get_rule_types().values():
+        typed |= Q(modulename=rule_type.modulename, classname=rule_type.classname)
+    return InclusionRule.objects.prefetch_related(
         "group_permissions__permissions"
-    )
+    ).filter(typed)
 
 
 def parse_rule_payload(body):
@@ -282,13 +289,29 @@ class ResourceSetsView(SuperuserAPIView):
         return JSONResponse({"resource_sets": resource_sets})
 
 
+def get_groups_queryset():
+    return Group.objects.annotate(
+        member_count=Count("user", distinct=True),
+        anonymous_count=Count(
+            "user", filter=Q(user__username=ANONYMOUS_USERNAME), distinct=True
+        ),
+    )
+
+
 def serialize_group(group):
-    return {"id": group.pk, "name": group.name, "member_count": group.user_set.count()}
+    return {
+        "id": group.pk,
+        "name": group.name,
+        "member_count": group.member_count,
+        "is_built_in": group.name in BUILT_IN_GROUP_NAMES,
+        # Grants to this group apply to logged-out visitors.
+        "is_public": group.name == PUBLIC_GROUP_NAME or group.anonymous_count > 0,
+    }
 
 
 class GroupsView(SuperuserAPIView):
     def get(self, request):
-        groups = Group.objects.order_by("name")
+        groups = get_groups_queryset().order_by("name")
         return JSONResponse({"groups": [serialize_group(group) for group in groups]})
 
     def post(self, request):
@@ -306,6 +329,7 @@ class GroupsView(SuperuserAPIView):
                 message=_("A group with this name already exists."),
                 status=HTTPStatus.CONFLICT,
             )
+        group = get_groups_queryset().get(pk=group.pk)
         return JSONResponse(serialize_group(group), status=HTTPStatus.CREATED)
 
 
@@ -316,6 +340,11 @@ class GroupView(SuperuserAPIView):
         except Group.DoesNotExist:
             return JSONErrorResponse(
                 message=_("Group not found."), status=HTTPStatus.NOT_FOUND
+            )
+        if group.name in BUILT_IN_GROUP_NAMES:
+            return JSONErrorResponse(
+                message=_("Built-in Arches groups cannot be deleted."),
+                status=HTTPStatus.CONFLICT,
             )
         if group.user_set.exists():
             return JSONErrorResponse(

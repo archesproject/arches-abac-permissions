@@ -2,7 +2,7 @@ import { PERMISSION_NAMES } from "@/arches_abac_permissions/constants.ts";
 import { getRuleTypeForKey } from "@/arches_abac_permissions/rule-types/index.ts";
 
 import type {
-    Account,
+    User,
     Group,
     PermissionName,
     Rule,
@@ -28,7 +28,7 @@ export function draftFromRule(rule: Rule): RuleDraft {
     }
     return {
         id: rule.id,
-        rule_type: rule.rule_type ?? "",
+        rule_type: rule.rule_type,
         name: rule.name,
         description: rule.description,
         active: rule.active,
@@ -143,13 +143,13 @@ export function isDraftComplete(draft: RuleDraft): boolean {
     );
 }
 
-export function accountDisplayName(account: Account): string {
-    const name = `${account.first_name} ${account.last_name}`.trim();
-    return name || account.username;
+export function userDisplayName(user: User): string {
+    const name = `${user.first_name} ${user.last_name}`.trim();
+    return name || user.username;
 }
 
-export function accountMatchesFilter(
-    account: Account,
+export function userMatchesFilter(
+    user: User,
     filter: string,
     groupNames: string[],
 ): boolean {
@@ -157,22 +157,18 @@ export function accountMatchesFilter(
     if (!query) {
         return true;
     }
-    return [
-        account.username,
-        account.first_name,
-        account.last_name,
-        account.email,
-        ...groupNames,
-    ].some((value) => value.toLowerCase().includes(query));
+    return [user.username, user.first_name, user.last_name, ...groupNames].some(
+        (value) => value.toLowerCase().includes(query),
+    );
 }
 
-// Groups held by some or all of `accounts`, with how many hold each.
+// Groups held by some or all of `users`, with how many hold each.
 export function groupHoldings(
-    accounts: Account[],
+    users: User[],
 ): { groupId: number; count: number }[] {
     const counts = new Map<number, number>();
-    for (const account of accounts) {
-        for (const groupId of account.groups) {
+    for (const user of users) {
+        for (const groupId of user.groups) {
             counts.set(groupId, (counts.get(groupId) ?? 0) + 1);
         }
     }

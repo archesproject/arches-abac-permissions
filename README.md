@@ -112,10 +112,10 @@ pip install -e arches-abac-permissions --group dev
 Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
 
 - **Rules** (left): filter, add, and delete rules.
-- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*, or a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed). *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`.
-- **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members cannot be deleted. **Save** stores the rule, its definition and all grants together.
+- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*, or a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed). *Search* and *QuerySet* rules are not evaluated yet. They declare no `rule_type`, so the plugin doesn't list them; manage them in the Django admin. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`.
+- **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members, or a built-in Arches group (tagged *Built-in*), cannot be deleted. Groups tagged *Public* apply to logged-out visitors, and the plugin warns when such a group is granted access. **Save** stores the rule, its definition and all grants together.
 
-The **Group Membership** view (switch at the top) lists groups, accounts and an editor. Filter accounts by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
+The **Group Membership** view (switch at the top) lists groups, users and an editor. Filter users by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
 
 Only superusers can see the plugin or call its API (`api/abac/...`). An inactive rule grants nothing.
 
@@ -132,9 +132,10 @@ When Arches checks a user's permissions on a single resource instance (viewing i
 Things to be aware of:
 
 - **SQL-based search (arches-search) honors inclusion rules; Elasticsearch search does not yet.** Rules apply to single-resource permission checks and to `filter_resource_queryset`, which arches-search uses. Resources a user can access through a rule will not yet appear in core Arches search results or on the search map.
-- **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser account.
+- **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser user.
 - **Users also need the model-level `read_nodegroup` permission** ("Models | node group | Read") to read a resource. Arches requires this in addition to resource-instance permissions.
 - A group permission with no permissions selected grants nothing, and its rule is not evaluated.
+- **Granting to Guest makes resources public.** Arches signs logged-out visitors in as the `anonymous` user, which belongs to Guest, so a rule granted to Guest (or to any group containing `anonymous`) applies to everyone who isn't logged in.
 
 ### Available rule classes
 

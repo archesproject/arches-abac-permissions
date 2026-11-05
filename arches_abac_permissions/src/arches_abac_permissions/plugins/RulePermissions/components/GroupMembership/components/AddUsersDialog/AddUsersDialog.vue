@@ -9,61 +9,60 @@ import MultiSelect from "openvue/multiselect";
 import Select from "openvue/select";
 
 import { changeMembership } from "@/arches_abac_permissions/api.ts";
-import { accountDisplayName } from "@/arches_abac_permissions/utils.ts";
+import { userDisplayName } from "@/arches_abac_permissions/utils.ts";
 
-import type { Account, Group } from "@/arches_abac_permissions/types";
+import type { User, Group } from "@/arches_abac_permissions/types";
 
 const { $gettext } = useGettext();
 
 const visible = defineModel<boolean>("visible", { required: true });
 const props = defineProps<{
     groups: Group[];
-    accounts: Account[];
+    users: User[];
     initialGroupId: number | null;
 }>();
-const emit = defineEmits<{ (e: "updated", accounts: Account[]): void }>();
+const emit = defineEmits<{ (e: "updated", users: User[]): void }>();
 
 const groupId = ref<number | null>(null);
-const accountIds = ref<number[]>([]);
+const userIds = ref<number[]>([]);
 const error = ref("");
 const isSaving = ref(false);
 
-// Only accounts not already in the chosen group.
+// Only users not already in the chosen group.
 const candidates = computed(() =>
-    props.accounts
+    props.users
         .filter(
-            (account) =>
-                groupId.value === null ||
-                !account.groups.includes(groupId.value),
+            (user) =>
+                groupId.value === null || !user.groups.includes(groupId.value),
         )
-        .map((account) => ({
-            id: account.id,
-            label: `${accountDisplayName(account)} (@${account.username})`,
+        .map((user) => ({
+            id: user.id,
+            label: `${userDisplayName(user)} (@${user.username})`,
         })),
 );
 
 watch(visible, (isVisible) => {
     if (isVisible) {
         groupId.value = props.initialGroupId;
-        accountIds.value = [];
+        userIds.value = [];
         error.value = "";
     }
 });
 
 watch(groupId, () => {
     const allowed = new Set(candidates.value.map((c) => c.id));
-    accountIds.value = accountIds.value.filter((id) => allowed.has(id));
+    userIds.value = userIds.value.filter((id) => allowed.has(id));
 });
 
 async function submit(): Promise<void> {
-    if (groupId.value === null || !accountIds.value.length || isSaving.value) {
+    if (groupId.value === null || !userIds.value.length || isSaving.value) {
         return;
     }
     isSaving.value = true;
     error.value = "";
     try {
         const updated = await changeMembership(
-            accountIds.value,
+            userIds.value,
             [groupId.value],
             [],
         );
@@ -82,37 +81,35 @@ async function submit(): Promise<void> {
         v-model:visible="visible"
         :modal="true"
         :draggable="false"
-        :header="$gettext('Add Accounts to Group')"
-        class="abac-add-accounts-dialog"
+        :header="$gettext('Add Users to Group')"
+        class="abac-add-users-dialog"
     >
         <form
-            class="add-accounts-form"
+            class="add-users-form"
             @submit.prevent="submit"
         >
-            <label for="abac-add-accounts-group">{{ $gettext("Group") }}</label>
+            <label for="abac-add-users-group">{{ $gettext("Group") }}</label>
             <Select
                 v-model="groupId"
-                input-id="abac-add-accounts-group"
+                input-id="abac-add-users-group"
                 :options="groups"
                 option-label="name"
                 option-value="id"
                 :filter="true"
                 :placeholder="$gettext('Select a group…')"
             />
-            <label for="abac-add-accounts-users">{{
-                $gettext("Accounts")
-            }}</label>
+            <label for="abac-add-users-select">{{ $gettext("Users") }}</label>
             <MultiSelect
-                v-model="accountIds"
-                input-id="abac-add-accounts-users"
+                v-model="userIds"
+                input-id="abac-add-users-select"
                 :options="candidates"
                 option-label="label"
                 option-value="id"
                 display="chip"
                 :filter="true"
                 :disabled="groupId === null"
-                :placeholder="$gettext('Select accounts…')"
-                :empty-message="$gettext('Every account is already a member')"
+                :placeholder="$gettext('Select users…')"
+                :empty-message="$gettext('Every user is already a member')"
             />
             <Message
                 v-if="error"
@@ -131,7 +128,7 @@ async function submit(): Promise<void> {
                 <Button
                     type="submit"
                     :label="$gettext('Add')"
-                    :disabled="groupId === null || !accountIds.length"
+                    :disabled="groupId === null || !userIds.length"
                     :loading="isSaving"
                 />
             </div>
@@ -141,20 +138,20 @@ async function submit(): Promise<void> {
 
 <style>
 /* Unscoped: Dialog is teleported out of this component. */
-.abac-add-accounts-dialog {
+.abac-add-users-dialog {
     inline-size: 48rem;
 }
 </style>
 
 <style scoped>
-.add-accounts-form {
+.add-users-form {
     display: flex;
     flex-direction: column;
     gap: 0.75rem;
     font-size: 1.4rem;
 }
 
-.add-accounts-form label {
+.add-users-form label {
     font-weight: 600;
 }
 

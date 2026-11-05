@@ -1,10 +1,12 @@
 <script setup lang="ts">
+import { computed } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Button from "openvue/button";
 import Checkbox from "openvue/checkbox";
 import ToggleSwitch from "openvue/toggleswitch";
 
+import GroupTags from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupTags/GroupTags.vue";
 import { PERMISSION_NAMES } from "@/arches_abac_permissions/constants.ts";
 import {
     hasPermission,
@@ -68,6 +70,10 @@ function toggleAll(permission: PermissionName): void {
 function hasAny(groupId: number): boolean {
     return (draft.value?.grants[groupId] ?? []).length > 0;
 }
+
+const publicGrantees = computed(() =>
+    props.groups.filter((group) => group.is_public && hasAny(group.id)),
+);
 
 function toggleGroup(groupId: number): void {
     if (draft.value) {
@@ -133,6 +139,26 @@ function toggleGroup(groupId: number): void {
             }}
         </p>
         <template v-else>
+            <p
+                v-if="publicGrantees.length > 0"
+                class="public-warning"
+                role="alert"
+            >
+                <i
+                    class="pi pi-exclamation-triangle"
+                    aria-hidden="true"
+                ></i>
+                {{
+                    $gettext(
+                        "%{groups} includes visitors who are not logged in, so resources matching this rule become public.",
+                        {
+                            groups: publicGrantees
+                                .map((group) => group.name)
+                                .join(", "),
+                        },
+                    )
+                }}
+            </p>
             <div class="table-wrapper">
                 <table class="grants">
                     <caption class="sr-only">
@@ -217,9 +243,13 @@ function toggleGroup(groupId: number): void {
                                 class="name-cell"
                             >
                                 <span class="group-name">
-                                    <span class="group-label">{{
-                                        group.name
-                                    }}</span>
+                                    <span class="group-label">
+                                        {{ group.name }}
+                                        <GroupTags
+                                            :is-built-in="group.is_built_in"
+                                            :is-public="group.is_public"
+                                        />
+                                    </span>
                                     <button
                                         type="button"
                                         class="link-button"
@@ -277,6 +307,7 @@ function toggleGroup(groupId: number): void {
                             </td>
                             <td class="action-cell">
                                 <button
+                                    v-if="!group.is_built_in"
                                     type="button"
                                     class="row-delete"
                                     :title="$gettext('Delete group')"
@@ -308,6 +339,23 @@ function toggleGroup(groupId: number): void {
 </template>
 
 <style scoped>
+.public-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+    margin: 1.2rem 1.6rem 0;
+    padding: 0.8rem 1.2rem;
+    border: 0.1rem solid var(--p-abac-warning-border);
+    border-radius: 0.6rem;
+    background: var(--p-abac-warning-bg);
+    color: var(--p-abac-warning-text);
+    font-size: 1.3rem;
+}
+
+.public-warning .pi {
+    margin-block-start: 0.2rem;
+}
+
 .active-toggle {
     display: flex;
     align-items: center;
@@ -394,6 +442,9 @@ function toggleGroup(groupId: number): void {
 }
 
 .group-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
     min-inline-size: 0;
     overflow: hidden;
     text-overflow: ellipsis;

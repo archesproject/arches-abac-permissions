@@ -1,8 +1,11 @@
+from http import HTTPStatus
+
 from django.contrib.auth.models import Group, User
 from django.db import transaction
 from django.utils.translation import gettext as _
 
-from arches.app.utils.response import JSONResponse
+from arches.app.utils.response import JSONErrorResponse, JSONResponse
+from arches_abac_permissions.rule_types import ANONYMOUS_USERNAME
 from arches_abac_permissions.views import BadRequest, SuperuserAPIView
 
 
@@ -12,12 +15,20 @@ def serialize_user(user):
         "username": user.username,
         "first_name": user.first_name,
         "last_name": user.last_name,
-        "email": user.email,
         "is_active": user.is_active,
         "is_superuser": user.is_superuser,
+        # Logged-out visitors act as this user.
+        "is_public": user.username == ANONYMOUS_USERNAME,
+        "groups": sorted(group.pk for group in user.groups.all()),
+    }
+
+
+def serialize_user_details(user):
+    return {
+        **serialize_user(user),
+        "email": user.email,
         "last_login": user.last_login.isoformat() if user.last_login else None,
         "date_joined": user.date_joined.isoformat(),
-        "groups": sorted(group.pk for group in user.groups.all()),
     }
 
 
@@ -36,6 +47,17 @@ class UsersView(SuperuserAPIView):
         return JSONResponse({"users": [serialize_user(user) for user in users]})
 
 
+class UserView(SuperuserAPIView):
+    def get(self, request, user_id):
+        try:
+            user = User.objects.prefetch_related("groups").get(pk=user_id)
+        except User.DoesNotExist:
+            return JSONErrorResponse(
+                message=_("User not found."), status=HTTPStatus.NOT_FOUND
+            )
+        return JSONResponse(serialize_user_details(user))
+
+
 class UserGroupMembershipView(SuperuserAPIView):
     """Add and remove groups for one or more users in one transaction."""
 
@@ -45,13 +67,13 @@ class UserGroupMembershipView(SuperuserAPIView):
         add = parse_id_list(body, "add")
         remove = parse_id_list(body, "remove")
         if not user_ids:
-            raise BadRequest(_("Select at least one account."))
+            raise BadRequest(_("Select at least one user."))
         if add & remove:
             raise BadRequest(_("A group cannot be both added and removed."))
 
         users = list(User.objects.filter(pk__in=user_ids))
         if len(users) != len(user_ids):
-            raise BadRequest(_("Unknown account."))
+            raise BadRequest(_("Unknown user."))
         groups = {
             group.pk: group for group in Group.objects.filter(pk__in=add | remove)
         }

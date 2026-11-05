@@ -2,10 +2,11 @@ import arches from "arches";
 import Cookies from "js-cookie";
 
 import type {
-    Account,
     Group,
     Rule,
     RuleTypeInfo,
+    User,
+    UserDetails,
 } from "@/arches_abac_permissions/types";
 
 function getToken(): string {
@@ -73,8 +74,11 @@ export const createGroup = (name: string) =>
 export const deleteGroup = (groupId: number) =>
     request<void>(arches.urls.abac_group(groupId), "DELETE");
 
-export const fetchAccounts = async () =>
-    (await request<{ users: Account[] }>(arches.urls.abac_users)).users;
+export const fetchUsers = async () =>
+    (await request<{ users: User[] }>(arches.urls.abac_users)).users;
+
+export const fetchUserDetails = (userId: number) =>
+    request<UserDetails>(arches.urls.abac_user(userId));
 
 export const changeMembership = async (
     userIds: number[],
@@ -82,7 +86,7 @@ export const changeMembership = async (
     remove: number[],
 ) =>
     (
-        await request<{ users: Account[] }>(
+        await request<{ users: User[] }>(
             arches.urls.abac_user_group_membership,
             "POST",
             { user_ids: userIds, add, remove },
