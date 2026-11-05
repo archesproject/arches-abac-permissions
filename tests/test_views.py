@@ -1,6 +1,6 @@
 import json
 import uuid
-from unittest import skipIf
+from unittest import skipIf, skipUnless
 
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission, User
@@ -209,6 +209,25 @@ class ReferenceDataApiTests(ApiTestCase):
         self.assertEqual(response.status_code, 200)
         if not apps.is_installed("arches_resource_sets"):
             self.assertEqual(response.json()["resource_sets"], [])
+
+    @skipUnless(apps.is_installed("arches_resource_sets"), "needs resource sets")
+    def test_resource_sets_names(self):
+        from arches_resource_sets.models import ResourceSet
+
+        unnamed = ResourceSet.objects.create(
+            id="00000000-0000-0000-0000-000000000001", owner=self.superuser
+        )
+        named = ResourceSet.objects.create(owner=self.superuser, name="Zebras")
+        resource_sets = self.client.get(reverse("abac_resource_sets")).json()[
+            "resource_sets"
+        ]
+        self.assertEqual(
+            resource_sets,
+            [
+                {"id": str(unnamed.pk), "name": ""},
+                {"id": str(named.pk), "name": "Zebras"},
+            ],
+        )
 
     @skipIf(apps.is_installed("arches_resource_sets"), "resource sets installed")
     def test_resource_set_rule_unavailable_without_app(self):

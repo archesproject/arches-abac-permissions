@@ -1,5 +1,5 @@
 <script setup lang="ts">
-import { ref, watchEffect } from "vue";
+import { computed, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Select from "openvue/select";
@@ -24,6 +24,10 @@ const definition = defineModel<Partial<ResourceSetDefinition>>({
 });
 const resourceSets = ref<ResourceSet[]>([]);
 const isLoading = ref(true);
+// Prefer the name, falling back to the id for unnamed sets.
+const options = computed(() =>
+    resourceSets.value.map(({ id, name }) => ({ id, label: name || id })),
+);
 
 watchEffect(loadResourceSets);
 
@@ -53,9 +57,9 @@ async function loadResourceSets(): Promise<void> {
         <Select
             input-id="abac-resource-set"
             :model-value="definition.resource_set_id"
-            :options="resourceSets"
+            :options="options"
             :loading="isLoading"
-            option-label="id"
+            option-label="label"
             option-value="id"
             :filter="true"
             :placeholder="$gettext('Select a resource set…')"
