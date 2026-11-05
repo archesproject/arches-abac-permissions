@@ -6,12 +6,15 @@ from django.urls import reverse
 
 from arches.app.models.models import (
     GeoJSONGeometry,
+    GraphModel,
     MapLayer,
     MapSource,
     Node,
     NodeGroup,
     TileModel,
 )
+from arches.app.models.tile import Tile
+from arches_abac_permissions.rules.spatial_rule import parse_area
 from tests.test_inclusion_rules import make_rule
 from tests.test_views import ApiTestCase
 
@@ -51,26 +54,30 @@ class SpatialTestCase(ApiTestCase):
         cls.add_geometry(cls.other_node, cls.other_geometry_node, "POINT (5 5)")
 
     @classmethod
-    def add_geometry(cls, resource, node, wkt):
+    def add_geometry(cls, resource, node, *wkts):
         tile = TileModel.objects.create(
             resourceinstance=resource,
             nodegroup=cls.geometry_nodegroup,
             data={},
             sortorder=0,
         )
-        GeoJSONGeometry.objects.create(
-            tile=tile,
-            resourceinstance=resource,
-            node=node,
-            geom=GEOSGeometry(wkt, srid=4326),
-        )
+        for wkt in wkts:
+            GeoJSONGeometry.objects.create(
+                tile=tile,
+                resourceinstance=resource,
+                node=node,
+                geom=GEOSGeometry(wkt, srid=4326),
+            )
 
-    def definition(self, geometry=SQUARE, node=None):
-        return {
+    def definition(self, geometry=SQUARE, node=None, operator=None):
+        definition = {
             "graphid": str(self.graph.pk),
             "nodeid": str((node or self.geometry_node).pk),
             "geometry": geometry,
         }
+        if operator:
+            definition["operator"] = operator
+        return definition
 
     def make_spatial_rule(self, **kwargs):
         return make_rule(
@@ -116,6 +123,114 @@ class SpatialRuleTests(SpatialTestCase):
             set(rule.get_matching_resources()), {self.inside, self.crossing}
         )
 
+    def test_operators(self):
+        mostly_outside = self.make_resource(self.graph, self.active_state)
+        self.add_geometry(mostly_outside, self.geometry_node, "LINESTRING (-20 5, 2 5)")
+        partly_inside = self.make_resource(self.graph, self.active_state)
+        self.add_geometry(
+            partly_inside, self.geometry_node, "POINT (5 5)", "POINT (20 20)"
+        )
+        # Its centroid is in the area, but it doesn't touch it.
+        ring = self.make_resource(self.graph, self.active_state)
+        self.add_geometry(
+            ring,
+            self.geometry_node,
+            "POLYGON ((-5 -5, 15 -5, 15 15, -5 15, -5 -5),"
+            " (-1 -1, 11 -1, 11 11, -1 11, -1 -1))",
+        )
+        expected = {
+            None: {self.inside, self.crossing, mostly_outside, partly_inside},
+            "intersects": {self.inside, self.crossing, mostly_outside, partly_inside},
+            "within": {self.inside},
+            "centroid": {self.inside, self.crossing, partly_inside, ring},
+        }
+        candidates = {
+            self.inside,
+            self.crossing,
+            self.outside,
+            self.other_node,
+            mostly_outside,
+            partly_inside,
+            ring,
+        }
+        for operator, matches in expected.items():
+            with self.subTest(operator=operator):
+                rule = self.make_spatial_rule(operator=operator)
+                rule.clean()
+                self.assertEqual(set(rule.get_matching_resources()), matches)
+                for resource in candidates:
+                    self.assertEqual(
+                        rule.matches_resource(resource), resource in matches
+                    )
+
+    def test_geometry_refreshed_by_tile_writes(self):
+        resource = self.make_resource(self.graph, self.active_state)
+
+        def collection(x, y):
+            return {
+                "type": "FeatureCollection",
+                "features": [
+                    {
+                        "type": "Feature",
+                        "id": str(uuid.uuid4()),
+                        "properties": {},
+                        "geometry": {"type": "Point", "coordinates": [x, y]},
+                    }
+                ],
+            }
+
+        node = str(self.geometry_node.pk)
+        tile = TileModel.objects.create(
+            resourceinstance=resource,
+            nodegroup=self.geometry_nodegroup,
+            data={node: collection(5, 5)},
+            sortorder=0,
+        )
+        rule = self.make_spatial_rule()
+        # Core refreshes geojson_geometries in after_update_all, not save().
+        self.assertFalse(rule.matches_resource(resource))
+        Tile.objects.get(pk=tile.pk).after_update_all()
+        self.assertTrue(rule.matches_resource(resource))
+        tile.data = {node: collection(20, 20)}
+        tile.save()
+        self.assertTrue(rule.matches_resource(resource))
+        Tile.objects.get(pk=tile.pk).after_update_all()
+        self.assertFalse(rule.matches_resource(resource))
+
+    def test_area_is_parsed_once(self):
+        parse_area.cache_clear()
+        rule = self.make_spatial_rule()
+        rule.matches_resource(self.inside)
+        rule.matches_resource(self.outside)
+        self.assertEqual(parse_area.cache_info().misses, 1)
+
+    def test_draft_graph_rejected(self):
+        draft = GraphModel.objects.create(
+            name="Draft",
+            slug="test_graph_draft",
+            isresource=True,
+            source_identifier=self.graph,
+        )
+        node = Node.objects.create(
+            name="draft",
+            alias="draft",
+            datatype="geojson-feature-collection",
+            graph=draft,
+            nodegroup=NodeGroup.objects.create(),
+            istopnode=False,
+        )
+        rule = make_rule(
+            modulename="spatial_rule.py",
+            classname="SpatialRule",
+            definition={
+                "graphid": str(draft.pk),
+                "nodeid": str(node.pk),
+                "geometry": SQUARE,
+            },
+        )
+        with self.assertRaises(ValidationError):
+            rule.clean()
+
     def test_crs_member_is_ignored(self):
         rule = self.make_spatial_rule(
             geometry={
@@ -145,6 +260,17 @@ class SpatialRuleTests(SpatialTestCase):
             self.definition(geometry={"type": "Polygon", "coordinates": "x"}),
             self.definition(geometry={"type": "Polygon", "coordinates": []}),
             self.definition(geometry=bowtie),
+            self.definition(operator="not intersects"),
+            {**self.definition(), "graphid": "not-a-uuid"},
+            # Crosses the antimeridian, so would be read as 340° wide.
+            self.definition(
+                geometry={
+                    "type": "Polygon",
+                    "coordinates": [
+                        [[170, 0], [-170, 0], [-170, 10], [170, 10], [170, 0]]
+                    ],
+                }
+            ),
             self.definition(geometry=too_many),
             self.definition(
                 geometry={
@@ -175,8 +301,23 @@ class SpatialApiTests(SpatialTestCase):
         definition = self.definition()
         created = self.create_rule(rule_type="spatial", definition=definition)
         self.assertEqual(created["rule_type"], "spatial")
-        self.assertEqual(created["definition"], definition)
+        self.assertEqual(
+            created["definition"], {**definition, "operator": "intersects"}
+        )
         self.assertIn("geojson_geometries", created["index_sql"])
+
+    def test_geometry_is_normalised(self):
+        definition = self.definition(
+            geometry={
+                **SQUARE,
+                "crs": {"type": "name", "properties": {"name": "EPSG:3857"}},
+                "bbox": [0, 0, 10, 10],
+            },
+            operator="within",
+        )
+        created = self.create_rule(rule_type="spatial", definition=definition)
+        self.assertEqual(created["definition"]["geometry"], SQUARE)
+        self.assertEqual(created["definition"]["operator"], "within")
 
     def test_invalid_geometry_rejected(self):
         response = self.send(

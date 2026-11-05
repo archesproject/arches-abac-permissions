@@ -27,10 +27,12 @@ import type {
     MapConfig,
     ResourceModel,
     SpatialDefinition,
+    SpatialOperator,
 } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const AREA_HELP_ID = "abac-area-help";
 const GEOJSON_ERROR_ID = "abac-area-geojson-error";
+const DEFAULT_OPERATOR: SpatialOperator = "intersects";
 
 const definition = defineModel<Partial<SpatialDefinition>>({
     required: true,
@@ -56,6 +58,39 @@ const nodeOptions = computed(() =>
         ...node,
         label: `${node.name} (${node.alias})`,
     })),
+);
+const operator = computed(
+    (): SpatialOperator => definition.value.operator ?? DEFAULT_OPERATOR,
+);
+const operatorOptions = computed(
+    (): { value: SpatialOperator; label: string; help: string }[] => [
+        {
+            value: "intersects",
+            label: $gettext("Touches or overlaps the area"),
+            help: $gettext(
+                "Matches resources with a geometry in the node that touches or overlaps the area.",
+            ),
+        },
+        {
+            value: "within",
+            label: $gettext("Is entirely inside the area"),
+            help: $gettext(
+                "Matches resources whose geometries in the node all lie inside the area.",
+            ),
+        },
+        {
+            value: "centroid",
+            label: $gettext("Has its centre in the area"),
+            help: $gettext(
+                "Matches resources with a geometry in the node whose centre is in the area.",
+            ),
+        },
+    ],
+);
+const areaHelp = computed(
+    (): string =>
+        operatorOptions.value.find((option) => option.value === operator.value)
+            ?.help ?? "",
 );
 // Updates the geometry in place so the definition's key order (and thus the
 // dirty check) is stable.
@@ -125,15 +160,23 @@ async function loadMapConfig(): Promise<void> {
 }
 
 function onModelChange(selectedGraphid: string | null): void {
-    // Nodes belong to a model; the area is kept since it doesn't.
+    // Nodes belong to a model; the area and operator don't.
     definition.value = {
         graphid: selectedGraphid ?? undefined,
         geometry: definition.value.geometry,
+        operator: definition.value.operator,
     };
 }
 
 function onNodeChange(nodeid: string | null): void {
     definition.value = { ...definition.value, nodeid: nodeid ?? undefined };
+}
+
+function onOperatorChange(selected: SpatialOperator | null): void {
+    definition.value = {
+        ...definition.value,
+        operator: selected ?? DEFAULT_OPERATOR,
+    };
 }
 
 function onGeoJsonToggle(event: Event): void {
@@ -195,17 +238,26 @@ function applyGeoJson(): void {
             @update:model-value="onNodeChange"
         />
     </div>
+    <div class="field">
+        <label for="abac-spatial-operator">{{
+            $gettext("Spatial Relationship")
+        }}</label>
+        <Select
+            input-id="abac-spatial-operator"
+            :model-value="operator"
+            :options="operatorOptions"
+            option-label="label"
+            option-value="value"
+            @update:model-value="onOperatorChange"
+        />
+    </div>
     <fieldset class="field area-field">
         <legend class="section-label">{{ $gettext("Area") }}</legend>
         <p
             :id="AREA_HELP_ID"
             class="area-help"
         >
-            {{
-                $gettext(
-                    "Matches resources with a geometry that intersects the area.",
-                )
-            }}
+            {{ areaHelp }}
         </p>
         <AreaMap
             v-if="mapConfig"

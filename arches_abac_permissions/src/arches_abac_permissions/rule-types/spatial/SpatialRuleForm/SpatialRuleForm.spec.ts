@@ -65,6 +65,12 @@ function mountForm(definition: Partial<SpatialDefinition>): VueWrapper {
     return wrapper;
 }
 
+function findSelect(wrapper: VueWrapper, inputId: string): VueWrapper {
+    return wrapper
+        .findAllComponents({ name: "Select" })
+        .find((select) => select.attributes("input-id") === inputId)!;
+}
+
 function lastDefinition(wrapper: VueWrapper): Partial<SpatialDefinition> {
     return wrapper.props("modelValue") as Partial<SpatialDefinition>;
 }
@@ -135,25 +141,44 @@ describe("SpatialRuleForm", () => {
         wrapper.unmount();
     });
 
-    it("keeps the area but drops the node when the model changes", async () => {
+    it("keeps the area and operator but drops the node when the model changes", async () => {
         const wrapper = mountForm({
             graphid: "g",
             nodeid: "n",
             geometry: square,
+            operator: "within",
         });
         await flushPromises();
-        wrapper
-            .findAllComponents({ name: "Select" })
-            .find(
-                (select) =>
-                    select.attributes("input-id") === "abac-resource-model",
-            )
-            ?.vm.$emit("update:modelValue", "other");
+        findSelect(wrapper, "abac-resource-model").vm.$emit(
+            "update:modelValue",
+            "other",
+        );
         await flushPromises();
         expect(lastDefinition(wrapper)).toEqual({
             graphid: "other",
             geometry: square,
+            operator: "within",
         });
+        wrapper.unmount();
+    });
+
+    it("defaults to intersects and describes the chosen operator", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        const operatorSelect = findSelect(wrapper, "abac-spatial-operator");
+        expect(operatorSelect.attributes("model-value")).toBe("intersects");
+        expect(wrapper.find("#abac-area-help").text()).toContain(
+            "touches or overlaps",
+        );
+
+        operatorSelect.vm.$emit("update:modelValue", "centroid");
+        await flushPromises();
+        expect(lastDefinition(wrapper)).toEqual({
+            graphid: "g",
+            nodeid: "n",
+            operator: "centroid",
+        });
+        expect(wrapper.find("#abac-area-help").text()).toContain("centre");
         wrapper.unmount();
     });
 

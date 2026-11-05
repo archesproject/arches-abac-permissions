@@ -2,11 +2,15 @@ import type { MultiPolygon, Polygon } from "geojson";
 
 export type AreaGeometry = Polygon | MultiPolygon;
 
+export type SpatialOperator = "intersects" | "within" | "centroid";
+
 export interface SpatialDefinition {
     graphid: string;
     nodeid: string;
     // EPSG:4326
     geometry: AreaGeometry;
+    // The backend defaults to "intersects".
+    operator?: SpatialOperator;
 }
 
 export interface ResourceModel {
