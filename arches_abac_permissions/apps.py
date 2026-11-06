@@ -10,5 +10,6 @@ class ArchesAbacPermissionsConfig(AppConfig):
         from arches_abac_permissions.rules import (  # noqa
             lifecycle_state_rule,
             queryset_rule,
+            resource_set_rule,
             search_rule,
         )
