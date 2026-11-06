@@ -1,41 +1,100 @@
-import type { Feature, Geometry, Polygon, Position } from "geojson";
+import type {
+    Feature,
+    FeatureCollection,
+    Geometry,
+    Polygon,
+    Position,
+} from "geojson";
 
 import type { AreaGeometry } from "@/arches_abac_permissions/rule-types/spatial/types";
 
-export function polygonsOf(geometry: AreaGeometry | undefined): Polygon[] {
+const POLYGONAL_TYPES = ["Polygon", "MultiPolygon"];
+const SIMPLE_TYPES = [
+    ...POLYGONAL_TYPES,
+    "Point",
+    "MultiPoint",
+    "LineString",
+    "MultiLineString",
+];
+
+// Flattens Multi* geometries and collections into simple geometries.
+export function partsOf(geometry: Geometry | undefined): Geometry[] {
     if (!geometry) {
         return [];
     }
-    if (geometry.type === "Polygon") {
-        return [geometry];
+    switch (geometry.type) {
+        case "GeometryCollection":
+            return geometry.geometries.flatMap(partsOf);
+        case "MultiPolygon":
+            return geometry.coordinates.map((coordinates) => ({
+                type: "Polygon",
+                coordinates,
+            }));
+        case "MultiPoint":
+            return geometry.coordinates.map((coordinates) => ({
+                type: "Point",
+                coordinates,
+            }));
+        case "MultiLineString":
+            return geometry.coordinates.map((coordinates) => ({
+                type: "LineString",
+                coordinates,
+            }));
+        default:
+            return [geometry];
     }
-    return geometry.coordinates.map((coordinates) => ({
-        type: "Polygon",
-        coordinates,
-    }));
 }
 
-// Combines polygons into the rule's area; undefined when there are none.
+// Combines geometries into the rule's area; undefined when there are none.
 export function areaOf(geometries: Geometry[]): AreaGeometry | undefined {
-    const rings: Position[][][] = geometries.flatMap((geometry) => {
-        if (geometry.type === "Polygon") {
-            return [geometry.coordinates];
+    const parts = geometries.flatMap(partsOf);
+    if (!parts.length) {
+        return undefined;
+    }
+    if (parts.every((part) => POLYGONAL_TYPES.includes(part.type))) {
+        const rings = parts.map((part) => (part as Polygon).coordinates);
+        return rings.length === 1
+            ? { type: "Polygon", coordinates: rings[0] }
+            : { type: "MultiPolygon", coordinates: rings };
+    }
+    return { type: "GeometryCollection", geometries: parts };
+}
+
+export function toFeatureCollection(
+    area: AreaGeometry | undefined,
+): FeatureCollection {
+    return {
+        type: "FeatureCollection",
+        features: partsOf(area).map((geometry) => ({
+            type: "Feature",
+            properties: {},
+            geometry,
+        })),
+    };
+}
+
+// Points and lines have no area until buffered.
+export function needsBuffer(area: AreaGeometry | undefined): boolean {
+    return partsOf(area).some((part) => !POLYGONAL_TYPES.includes(part.type));
+}
+
+export function positionsOf(area: AreaGeometry | undefined): Position[] {
+    return partsOf(area).flatMap((part): Position[] => {
+        if (part.type === "Point") {
+            return [part.coordinates];
         }
-        if (geometry.type === "MultiPolygon") {
-            return geometry.coordinates;
+        if (part.type === "LineString") {
+            return part.coordinates;
+        }
+        if (part.type === "Polygon") {
+            return part.coordinates.flat();
         }
         return [];
     });
-    if (!rings.length) {
-        return undefined;
-    }
-    return rings.length === 1
-        ? { type: "Polygon", coordinates: rings[0] }
-        : { type: "MultiPolygon", coordinates: rings };
 }
 
-// Accepts a Polygon or MultiPolygon geometry, Feature or FeatureCollection.
-// Throws when the text holds no polygons or anything else.
+// Accepts a geometry, Feature, FeatureCollection or GeometryCollection of
+// polygons, points and lines. Throws on anything else.
 export function parseArea(text: string): AreaGeometry {
     const parsed = JSON.parse(text);
     const geometries: unknown[] =
@@ -44,19 +103,24 @@ export function parseArea(text: string): AreaGeometry {
                   (feature: Feature) => feature?.geometry,
               )
             : [parsed?.type === "Feature" ? parsed.geometry : parsed];
-    const valid = geometries.every(
-        (geometry) =>
-            isPolygonal(geometry) &&
-            Array.isArray((geometry as Polygon).coordinates),
-    );
+    const valid = geometries.every((geometry) => isSimple(geometry, true));
     const area = valid ? areaOf(geometries as Geometry[]) : undefined;
     if (!area) {
-        throw new Error("Not a polygon");
+        throw new Error("Not a supported geometry");
     }
     return area;
 }
 
-function isPolygonal(geometry: unknown): boolean {
-    const type = (geometry as Geometry | null)?.type;
-    return type === "Polygon" || type === "MultiPolygon";
+function isSimple(geometry: unknown, allowCollection: boolean): boolean {
+    const candidate = geometry as Geometry | null;
+    if (candidate?.type === "GeometryCollection" && allowCollection) {
+        return (
+            Array.isArray(candidate.geometries) &&
+            candidate.geometries.every((member) => isSimple(member, false))
+        );
+    }
+    return (
+        SIMPLE_TYPES.includes(candidate?.type ?? "") &&
+        Array.isArray((candidate as { coordinates?: unknown }).coordinates)
+    );
 }
