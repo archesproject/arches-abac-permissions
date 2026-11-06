@@ -1,9 +1,11 @@
 from django.apps import apps
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from arches.app.models.models import ResourceInstance
 from arches_abac_permissions.models import InclusionRule
+from arches_abac_permissions.rule_types import RuleType
 
 # arches-resource-sets is optional, and this module is imported at startup by apps.py.
 RESOURCE_SETS_INSTALLED = apps.is_installed("arches_resource_sets")
@@ -17,6 +19,15 @@ class ResourceSetRule(InclusionRule):
 
     definition: {"resource_set_id": "<resource set id>"}
     """
+
+    rule_type = RuleType(
+        key="resource_set",
+        label=gettext_lazy("Resource is in Resource Set"),
+        description=gettext_lazy("Matches the members of a resource set"),
+        icon="pi pi-th-large",
+        definition_keys=("resource_set_id",),
+        required_app="arches_resource_sets",
+    )
 
     @classmethod
     def get_search_rule_url(cls, inclusion_rule):

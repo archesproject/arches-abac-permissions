@@ -18,6 +18,8 @@ class InclusionRule(models.Model):
         User, db_column="owner_id", on_delete=deletion.SET_NULL, null=True
     )
     name = models.TextField()
+    description = models.TextField(blank=True, default="")
+    active = models.BooleanField(default=True)
     modulename = models.TextField(blank=True, null=True)
     classname = models.TextField(blank=True, null=True)
     definition = models.JSONField()
@@ -27,6 +29,19 @@ class InclusionRule(models.Model):
         return get_class_from_modulename(
             self.modulename, self.classname, RuleExtensionType.RULES
         )
+
+    @classmethod
+    def clean_definition(cls, raw_definition, definition_keys):
+        """
+        Coerce a client-submitted definition to what the rule stores. The
+        default keeps ``definition_keys`` as strings; rules with structured
+        values (e.g. geometry) override this.
+        """
+        return {
+            key: str(raw_definition[key])
+            for key in definition_keys
+            if raw_definition.get(key) is not None
+        }
 
     @classmethod
     def validate_definition(cls, inclusion_rule):

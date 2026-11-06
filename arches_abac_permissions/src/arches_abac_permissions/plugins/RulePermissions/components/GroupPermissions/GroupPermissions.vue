@@ -1,0 +1,508 @@
+<script setup lang="ts">
+import { computed } from "vue";
+import { useGettext } from "vue3-gettext";
+
+import Button from "openvue/button";
+import Checkbox from "openvue/checkbox";
+import ToggleSwitch from "openvue/toggleswitch";
+
+import GroupTags from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupTags/GroupTags.vue";
+import { PERMISSION_NAMES } from "@/arches_abac_permissions/constants.ts";
+import {
+    hasPermission,
+    setGroupPermissions,
+    setPermission,
+    setPermissionForAllGroups,
+} from "@/arches_abac_permissions/utils.ts";
+
+import type {
+    Group,
+    PermissionName,
+    RuleDraft,
+} from "@/arches_abac_permissions/types";
+
+const { $gettext } = useGettext();
+
+const props = defineProps<{
+    groups: Group[];
+    canSave: boolean;
+    isDirty: boolean;
+    isSaving: boolean;
+}>();
+const draft = defineModel<RuleDraft | null>({ required: true });
+const emit = defineEmits<{
+    (e: "save"): void;
+    (e: "cancel"): void;
+    (e: "add-group"): void;
+    (e: "delete-group", group: Group): void;
+}>();
+
+function permissionLabel(permission: PermissionName): string {
+    return {
+        read: $gettext("Read"),
+        update: $gettext("Update"),
+        delete: $gettext("Delete"),
+    }[permission];
+}
+
+function allGranted(permission: PermissionName): boolean {
+    const current = draft.value;
+    return (
+        !!current &&
+        props.groups.length > 0 &&
+        props.groups.every((group) =>
+            hasPermission(current, group.id, permission),
+        )
+    );
+}
+
+function toggleAll(permission: PermissionName): void {
+    if (draft.value) {
+        setPermissionForAllGroups(
+            draft.value,
+            props.groups,
+            permission,
+            !allGranted(permission),
+        );
+    }
+}
+
+function hasAny(groupId: number): boolean {
+    return (draft.value?.grants[groupId] ?? []).length > 0;
+}
+
+const publicGrantees = computed(() =>
+    props.groups.filter((group) => group.is_public && hasAny(group.id)),
+);
+
+function toggleGroup(groupId: number): void {
+    if (draft.value) {
+        setGroupPermissions(
+            draft.value,
+            groupId,
+            hasAny(groupId) ? [] : PERMISSION_NAMES,
+        );
+    }
+}
+</script>
+
+<template>
+    <section
+        class="column"
+        :aria-label="$gettext('Assign Group Permissions to Rule')"
+    >
+        <header class="column-header">
+            <h2 class="column-title">
+                <i
+                    class="pi pi-users"
+                    aria-hidden="true"
+                ></i>
+                {{ $gettext("Assign Group Permissions to Rule") }}
+            </h2>
+            <span
+                v-if="draft"
+                class="toolbar-actions"
+            >
+                <label
+                    class="active-toggle"
+                    for="abac-rule-active"
+                >
+                    <ToggleSwitch
+                        v-model="draft.active"
+                        input-id="abac-rule-active"
+                    />
+                    {{
+                        draft.active ? $gettext("Active") : $gettext("Inactive")
+                    }}
+                </label>
+                <Button
+                    severity="secondary"
+                    variant="outlined"
+                    :label="$gettext('Cancel')"
+                    :disabled="isSaving"
+                    @click="emit('cancel')"
+                />
+                <Button
+                    :label="$gettext('Save')"
+                    :disabled="!canSave || !isDirty"
+                    :loading="isSaving"
+                    @click="emit('save')"
+                />
+            </span>
+        </header>
+        <p
+            v-if="!draft"
+            class="empty"
+        >
+            {{
+                $gettext("Select or create a rule to assign group permissions.")
+            }}
+        </p>
+        <template v-else>
+            <p
+                v-if="publicGrantees.length > 0"
+                class="public-warning"
+                role="alert"
+            >
+                <i
+                    class="pi pi-exclamation-triangle"
+                    aria-hidden="true"
+                ></i>
+                {{
+                    $gettext(
+                        "%{groups} includes visitors who are not logged in, so resources matching this rule become public.",
+                        {
+                            groups: publicGrantees
+                                .map((group) => group.name)
+                                .join(", "),
+                        },
+                    )
+                }}
+            </p>
+            <div class="table-wrapper">
+                <table class="grants">
+                    <caption class="sr-only">
+                        {{
+                            $gettext(
+                                "Permissions granted to each group on resources matching this rule",
+                            )
+                        }}
+                    </caption>
+                    <thead>
+                        <tr>
+                            <th
+                                scope="col"
+                                class="name-cell"
+                            >
+                                {{ $gettext("Group") }}
+                            </th>
+                            <th
+                                v-for="permission in PERMISSION_NAMES"
+                                :key="permission"
+                                scope="col"
+                                class="check-cell"
+                            >
+                                <button
+                                    type="button"
+                                    class="grant-button"
+                                    :aria-label="
+                                        allGranted(permission)
+                                            ? $gettext(
+                                                  'Revoke %{permission} from all groups',
+                                                  {
+                                                      permission:
+                                                          permissionLabel(
+                                                              permission,
+                                                          ),
+                                                  },
+                                              )
+                                            : $gettext(
+                                                  'Grant %{permission} to all groups',
+                                                  {
+                                                      permission:
+                                                          permissionLabel(
+                                                              permission,
+                                                          ),
+                                                  },
+                                              )
+                                    "
+                                    :disabled="groups.length === 0"
+                                    @click="toggleAll(permission)"
+                                >
+                                    <span>{{
+                                        allGranted(permission)
+                                            ? $gettext("Revoke")
+                                            : $gettext("Grant")
+                                    }}</span>
+                                    <span>{{
+                                        permissionLabel(permission)
+                                    }}</span>
+                                </button>
+                            </th>
+                            <th
+                                scope="col"
+                                class="action-cell"
+                            >
+                                <Button
+                                    size="small"
+                                    icon="pi pi-plus"
+                                    class="add-group"
+                                    :label="$gettext('Add Group')"
+                                    @click="emit('add-group')"
+                                />
+                            </th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        <tr
+                            v-for="group in groups"
+                            :key="group.id"
+                        >
+                            <th
+                                scope="row"
+                                class="name-cell"
+                            >
+                                <span class="group-name">
+                                    <span class="group-label">
+                                        {{ group.name }}
+                                        <GroupTags
+                                            :is-built-in="group.is_built_in"
+                                            :is-public="group.is_public"
+                                        />
+                                    </span>
+                                    <button
+                                        type="button"
+                                        class="link-button"
+                                        :aria-label="
+                                            hasAny(group.id)
+                                                ? $gettext(
+                                                      'Clear permissions for %{group}',
+                                                      { group: group.name },
+                                                  )
+                                                : $gettext(
+                                                      'Select all permissions for %{group}',
+                                                      { group: group.name },
+                                                  )
+                                        "
+                                        @click="toggleGroup(group.id)"
+                                    >
+                                        {{
+                                            hasAny(group.id)
+                                                ? $gettext("Clear selection")
+                                                : $gettext("Select all")
+                                        }}
+                                    </button>
+                                </span>
+                            </th>
+                            <td
+                                v-for="permission in PERMISSION_NAMES"
+                                :key="permission"
+                                class="check-cell"
+                            >
+                                <Checkbox
+                                    :binary="true"
+                                    :model-value="
+                                        hasPermission(
+                                            draft,
+                                            group.id,
+                                            permission,
+                                        )
+                                    "
+                                    :aria-label="
+                                        $gettext('%{permission} for %{group}', {
+                                            permission:
+                                                permissionLabel(permission),
+                                            group: group.name,
+                                        })
+                                    "
+                                    @update:model-value="
+                                        setPermission(
+                                            draft,
+                                            group.id,
+                                            permission,
+                                            $event,
+                                        )
+                                    "
+                                />
+                            </td>
+                            <td class="action-cell">
+                                <button
+                                    v-if="!group.is_built_in"
+                                    type="button"
+                                    class="row-delete"
+                                    :title="$gettext('Delete group')"
+                                    :aria-label="
+                                        $gettext('Delete group %{group}', {
+                                            group: group.name,
+                                        })
+                                    "
+                                    @click="emit('delete-group', group)"
+                                >
+                                    <i
+                                        class="pi pi-trash"
+                                        aria-hidden="true"
+                                    ></i>
+                                </button>
+                            </td>
+                        </tr>
+                    </tbody>
+                </table>
+                <p
+                    v-if="groups.length === 0"
+                    class="empty"
+                >
+                    {{ $gettext("There are no groups yet.") }}
+                </p>
+            </div>
+        </template>
+    </section>
+</template>
+
+<style scoped>
+.public-warning {
+    display: flex;
+    align-items: flex-start;
+    gap: 0.8rem;
+    margin: 1.2rem 1.6rem 0;
+    padding: 0.8rem 1.2rem;
+    border: 0.1rem solid var(--p-abac-warning-border);
+    border-radius: 0.6rem;
+    background: var(--p-abac-warning-bg);
+    color: var(--p-abac-warning-text);
+    font-size: 1.3rem;
+}
+
+.public-warning .pi {
+    margin-block-start: 0.2rem;
+}
+
+.active-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.5rem;
+    margin-inline-end: 0.4rem;
+    font-size: 1.25rem;
+    font-weight: 500;
+    color: var(--p-abac-text-primary);
+}
+
+.toolbar-actions {
+    margin-inline-start: auto;
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.table-wrapper {
+    flex: 1;
+    overflow: auto;
+    padding: 0 0.5rem;
+}
+
+.grants {
+    inline-size: 100%;
+    border-collapse: collapse;
+    font-size: 1.25rem;
+}
+
+.grants th,
+.grants td {
+    padding: 0.7rem 0;
+    border-block-end: 0.1rem solid var(--p-abac-border);
+    text-align: center;
+    vertical-align: middle;
+}
+
+.grants thead th {
+    position: sticky;
+    inset-block-start: 0;
+    z-index: 1;
+    background: var(--p-abac-surface-bg);
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--p-abac-text-secondary);
+}
+
+.grants tbody tr {
+    background: var(--p-abac-surface-card);
+    color: var(--p-abac-text-primary);
+}
+
+.grants tbody tr:hover {
+    background: var(--p-abac-row-hover);
+}
+
+.grants .name-cell {
+    padding-inline-start: 1.2rem;
+    text-align: start;
+}
+
+.grants tbody .name-cell {
+    font-weight: 400;
+}
+
+.check-cell {
+    inline-size: 7.6rem;
+}
+
+.action-cell {
+    inline-size: 9rem;
+    padding-inline-end: 1.2rem;
+}
+
+.grants tbody .action-cell {
+    text-align: end;
+}
+
+.group-name {
+    display: flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-inline-size: 0;
+}
+
+.group-label {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.6rem;
+    min-inline-size: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.grant-button {
+    margin: 0 auto;
+    padding: 0;
+    border: none;
+    background: none;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+    gap: 0.1rem;
+    color: var(--p-abac-accent);
+    font: inherit;
+    font-size: 1.2rem;
+    font-weight: 600;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.grant-button:hover {
+    color: var(--p-abac-brand-light);
+}
+
+.grant-button:disabled {
+    color: var(--p-abac-text-secondary);
+    cursor: default;
+    text-decoration: none;
+}
+
+.grant-button:focus-visible {
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: 0.2rem;
+}
+
+.grants :deep(.add-group.p-button) {
+    padding: 0.4rem 0.8rem;
+    font-size: 1.2rem;
+    font-weight: 500;
+    line-height: 1.6;
+    gap: 0.4rem;
+    border-radius: 0.4rem;
+    white-space: nowrap;
+}
+
+.grants :deep(.add-group .p-button-icon) {
+    font-size: 0.8rem;
+}
+
+.sr-only {
+    position: absolute;
+    inline-size: 0.1rem;
+    block-size: 0.1rem;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
+}
+</style>
