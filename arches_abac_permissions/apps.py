@@ -12,5 +12,6 @@ class ArchesAbacPermissionsConfig(AppConfig):
             queryset_rule,
             resource_set_rule,
             search_rule,
+            spatial_rule,
             tile_node_value_rule,
         )

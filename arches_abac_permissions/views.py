@@ -9,8 +9,9 @@ from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
 
-from arches.app.models.models import GraphModel, Language, Node
+from arches.app.models.models import GraphModel, Language, MapLayer, MapSource, Node
 from arches.app.models.system_settings import settings
+from arches.app.utils.geo_utils import GeoUtils
 from arches.app.utils.i18n import get_localized_value
 from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches.app.views.api import APIBase
@@ -26,6 +27,8 @@ from arches_abac_permissions.rule_types import (
 from arches_abac_permissions.rules.tile_node_value_rule import get_supported_datatypes
 
 GROUP_NAME_MAX_LENGTH = 150
+# Core's Maptoolkit basemap (Arches 8.2).
+STREETS_BASEMAP = "streets"
 CODENAME_TO_PERMISSION = {value: key for key, value in PERMISSION_CODENAMES.items()}
 
 
@@ -391,6 +394,43 @@ class ControlledListItemsView(SuperuserAPIView):
 
         visit(None, 0)
         return JSONResponse({"items": flattened})
+
+
+class MapConfigView(SuperuserAPIView):
+    """Core's streets basemap and defaults for drawing a spatial rule's area."""
+
+    def get(self, request):
+        basemap = None
+        layer = MapLayer.objects.filter(name=STREETS_BASEMAP, isoverlay=False).first()
+        if layer:
+            definitions = [
+                definition
+                for definition in layer.layerdefinitions or []
+                if isinstance(definition, dict)
+            ]
+            names = {definition.get("source") for definition in definitions}
+            basemap = {
+                "layers": definitions,
+                "sources": {
+                    source.name: source.source
+                    for source in MapSource.objects.filter(name__in=names)
+                },
+            }
+        bounds = (
+            GeoUtils().get_bounds_from_geojson(settings.DEFAULT_BOUNDS)
+            if settings.DEFAULT_BOUNDS
+            else None
+        )
+        return JSONResponse(
+            {
+                "basemap": basemap,
+                "bounds": list(bounds) if bounds else None,
+                "min_zoom": settings.MAP_MIN_ZOOM,
+                "max_zoom": settings.MAP_MAX_ZOOM,
+                "sprite": settings.MAPLIBRE_SPRITES,
+                "glyphs": settings.MAPLIBRE_GLYPHS,
+            }
+        )
 
 
 def serialize_group(group):
