@@ -33,7 +33,7 @@ const stubs = {
     ProgressSpinner: true,
     InputNumber: {
         name: "InputNumber",
-        props: ["modelValue"],
+        props: ["modelValue", "pt"],
         emits: ["update:modelValue"],
         template: "<input type='number' :value='modelValue' />",
     },
@@ -153,7 +153,9 @@ describe("SpatialRuleForm", () => {
         const wrapper = mountForm({ graphid: "g", nodeid: "n" });
         await flushPromises();
         const input = wrapper.findComponent({ name: "InputNumber" });
-        expect(input.attributes("aria-describedby")).toBe("abac-buffer-help");
+        expect(input.props("pt")).toEqual({
+            pcInputText: { root: { "aria-describedby": "abac-buffer-help" } },
+        });
         expect(wrapper.find("#abac-buffer-help").text()).toContain(
             "greater than 0",
         );

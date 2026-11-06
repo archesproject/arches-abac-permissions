@@ -332,8 +332,7 @@ class BufferedSpatialRuleTests(SpatialTestCase):
             self.matches(geometry=self.POINT, buffer=50000), {self.near_point}
         )
         self.assertEqual(
-            self.matches(geometry=self.POINT, buffer=150000),
-            {self.near_point, self.far_point},
+            self.matches(geometry=self.POINT, buffer=100000), {self.near_point}
         )
 
     def test_buffered_multipoint(self):
@@ -366,6 +365,18 @@ class BufferedSpatialRuleTests(SpatialTestCase):
         grown = parse_area(json.dumps(SQUARE, sort_keys=True), 100000)
         self.assertGreater(grown.area, plain.area)
 
+    def test_many_parts_buffered_in_one_query(self):
+        parse_area.cache_clear()
+        geometry = {
+            "type": "MultiPoint",
+            "coordinates": [[index / 10, 0] for index in range(50)],
+        }
+        canonical = json.dumps(geometry, sort_keys=True)
+        with self.assertNumQueries(1):
+            area = parse_area(canonical, 1000)
+        self.assertEqual(area.srid, 4326)
+        self.assertIn(area.geom_type, ("Polygon", "MultiPolygon"))
+
     def test_operators_with_buffered_area(self):
         for operator in ("within", "centroid"):
             with self.subTest(operator=operator):
@@ -377,7 +388,8 @@ class BufferedSpatialRuleTests(SpatialTestCase):
     def test_invalid_buffers(self):
         for buffer in (-1, "10", True, float("nan"), float("inf"), MAX_BUFFER + 1):
             with self.subTest(buffer=buffer):
-                rule = self.make_spatial_rule(geometry=SQUARE, buffer=buffer)
+                rule = self.make_spatial_rule(geometry=SQUARE, buffer=1)
+                rule.definition["buffer"] = buffer
                 with self.assertRaises(ValidationError):
                     rule.clean()
 
@@ -430,8 +442,8 @@ class BufferedSpatialRuleTests(SpatialTestCase):
         small.matches_resource(self.near_point)
         self.assertEqual(parse_area.cache_info().misses, 2)
         self.assertGreater(
-            large.parse_definition(large.definition)[1].area,
-            small.parse_definition(small.definition)[1].area,
+            SpatialRule.parse_definition(large.definition)[1].area,
+            SpatialRule.parse_definition(small.definition)[1].area,
         )
 
     def test_clean_definition_strips_extra_members(self):

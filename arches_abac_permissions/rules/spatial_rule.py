@@ -4,7 +4,7 @@ from functools import lru_cache
 
 from django.contrib.gis.db.models.functions import Centroid
 from django.contrib.gis.gdal import GDALException
-from django.contrib.gis.geos import GEOSException, GEOSGeometry, GeometryCollection
+from django.contrib.gis.geos import GEOSException, GEOSGeometry
 from django.db import connection
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
@@ -291,14 +291,17 @@ def check_bounds(area):
         )
 
 
-def buffer_part(part, buffer):
-    """Buffer by meters using PostGIS geography."""
+def buffer_parts(parts, buffer):
+    """Buffer by meters using PostGIS geography, merged in one query."""
     with connection.cursor() as cursor:
         cursor.execute(
-            "SELECT ST_AsEWKB(ST_Buffer(ST_GeomFromEWKB(%s)::geography, %s)::geometry)",
-            (bytes(part.ewkb), buffer),
+            "SELECT ST_AsEWKB(ST_Union(ST_Buffer(ST_GeomFromEWKB(g)::geography, %s)::geometry))"
+            " FROM unnest(%s::bytea[]) AS g",
+            (buffer, [bytes(part.ewkb) for part in parts]),
         )
-        return GEOSGeometry(bytes(cursor.fetchone()[0]))
+        area = GEOSGeometry(memoryview(cursor.fetchone()[0]))
+    area.srid = 4326
+    return area
 
 
 @lru_cache(maxsize=256)
@@ -320,9 +323,7 @@ def parse_area(canonical_geojson, buffer=0):
                 _("The area is not a valid polygon: %s") % part.valid_reason
             )
     if buffer > 0:
-        area = GeometryCollection(
-            [buffer_part(part, buffer) for part in parts], srid=4326
-        ).unary_union
+        area = buffer_parts(parts, buffer).unary_union
         area.srid = 4326
         check_bounds(area)
         return area

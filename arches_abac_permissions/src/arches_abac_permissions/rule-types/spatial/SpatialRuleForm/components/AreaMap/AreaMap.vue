@@ -344,16 +344,16 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
             >
                 <legend>{{ $gettext("Overlays") }}</legend>
                 <div
-                    v-for="overlay in config.overlays"
+                    v-for="(overlay, index) in config.overlays"
                     :key="overlay.name"
                     class="overlay-option"
                 >
                     <Checkbox
                         v-model="visibleOverlays[overlay.name]"
-                        :input-id="`abac-overlay-${overlay.name}`"
+                        :input-id="`abac-overlay-${index}`"
                         :binary="true"
                     />
-                    <label :for="`abac-overlay-${overlay.name}`">{{
+                    <label :for="`abac-overlay-${index}`">{{
                         overlay.name
                     }}</label>
                 </div>
