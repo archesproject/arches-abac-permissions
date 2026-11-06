@@ -301,7 +301,11 @@ function applyGeoJson(): void {
                 :max="MAX_BUFFER"
                 :step="1"
                 :use-grouping="false"
-                :aria-describedby="BUFFER_HELP_ID"
+                :pt="{
+                    pcInputText: {
+                        root: { 'aria-describedby': BUFFER_HELP_ID },
+                    },
+                }"
                 :invalid="requiresBuffer && !definition.buffer"
                 @update:model-value="onBufferChange"
             />
