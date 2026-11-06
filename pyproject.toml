@@ -25,7 +25,7 @@ requires-python = ">=3.12"
 dependencies = [
     "arches>=8.2.0a13,<8.3.0",
 ]
-version = "0.1.0a0"
+version = "0.1.0a1"
 
 [project.optional-dependencies]
 arches-resource-sets = ["arches-resource-sets>=0.1.0a2"]
