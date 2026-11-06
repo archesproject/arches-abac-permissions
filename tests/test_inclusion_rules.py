@@ -1,8 +1,11 @@
 import uuid
+from unittest import mock
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.core.signals import request_finished, request_started
+from django.db import DatabaseError, IntegrityError, transaction
+from django.db.utils import ProgrammingError
 from django.test import TestCase
 
 from arches.app.models.models import (
@@ -17,6 +20,8 @@ from arches.app.models.models import (
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.permissions.arches_abac_permission_framework import (
     ArchesAbacPermissionFramework,
+    end_request_reporting,
+    start_request_reporting,
 )
 from arches_abac_permissions.rules.lifecycle_state_rule import LifecycleStateRule
 from arches_abac_permissions.rules.queryset_rule import QuerySetRule
@@ -386,6 +391,136 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
                         self.user, ResourceInstance.objects.filter(graph=self.graph)
                     )
                 self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+
+class DatabaseErrorTests(LifecycleTestCase):
+    setUp = AbacRuleEvaluationTests.setUp
+    grant = AbacRuleEvaluationTests.grant
+    framework_logger = AbacRuleEvaluationTests.framework_logger
+
+    def test_database_errors_propagate_from_matches_resource(self):
+        for error in (DatabaseError, ProgrammingError):
+            with self.subTest(error=error.__name__):
+                with mock.patch.object(
+                    LifecycleStateRule, "matches_resource", side_effect=error("boom")
+                ):
+                    with self.assertNoLogs(self.framework_logger, "ERROR"):
+                        with self.assertRaises(DatabaseError):
+                            self.framework.get_perms(self.user, self.matching)
+
+    def test_database_errors_propagate_from_get_matching_resources(self):
+        for error in (DatabaseError, ProgrammingError):
+            with self.subTest(error=error.__name__):
+                with mock.patch.object(
+                    LifecycleStateRule,
+                    "get_matching_resources",
+                    side_effect=error("boom"),
+                ):
+                    with self.assertNoLogs(self.framework_logger, "ERROR"):
+                        with self.assertRaises(DatabaseError):
+                            self.framework.get_abac_resources(
+                                self.user, "view_resourceinstance"
+                            )
+                        with self.assertRaises(DatabaseError):
+                            self.framework.filter_resource_queryset(
+                                self.user,
+                                ResourceInstance.objects.filter(graph=self.graph),
+                            )
+
+
+class RuleErrorLoggingTests(LifecycleTestCase):
+    setUp = AbacRuleEvaluationTests.setUp
+    grant = AbacRuleEvaluationTests.grant
+    framework_logger = AbacRuleEvaluationTests.framework_logger
+
+    def setUp(self):
+        AbacRuleEvaluationTests.setUp(self)
+        self.grant(self.make_lifecycle_rule(), "view_resourceinstance")
+
+    # The signal receivers also close DB connections, so call the handlers.
+    def start_request(self):
+        start_request_reporting()
+        self.addCleanup(end_request_reporting)
+
+    def test_handlers_are_connected_to_request_signals(self):
+        for signal, uid in (
+            (request_started, "abac_start_request_reporting"),
+            (request_finished, "abac_end_request_reporting"),
+        ):
+            self.assertTrue(any(key[0] == uid for key, *_ in signal.receivers))
+
+    def evaluate_one_rule(self, rule):
+        with mock.patch.object(
+            LifecycleStateRule, "matches_resource", side_effect=ValueError("bad")
+        ):
+            with self.assertLogs(self.framework_logger, "DEBUG") as logs:
+                self.framework.evaluate_rule(
+                    rule, lambda r: r.matches_resource(self.matching), default=False
+                )
+        return [record.levelname for record in logs.records]
+
+    def test_logs_once_per_rule_per_request(self):
+        rule = InclusionRule.objects.first()
+        self.start_request()
+        self.assertEqual(self.evaluate_one_rule(rule), ["ERROR"])
+        self.assertEqual(self.evaluate_one_rule(rule), ["DEBUG"])
+
+    def test_each_failing_rule_logs_once(self):
+        first, second = InclusionRule.objects.order_by("pk")[:2]
+        self.start_request()
+        self.assertEqual(self.evaluate_one_rule(first), ["ERROR"])
+        self.assertEqual(self.evaluate_one_rule(second), ["ERROR"])
+        self.assertEqual(self.evaluate_one_rule(first), ["DEBUG"])
+
+    def test_logs_again_in_next_request(self):
+        rule = InclusionRule.objects.first()
+        self.start_request()
+        self.assertEqual(self.evaluate_one_rule(rule), ["ERROR"])
+        end_request_reporting()
+        start_request_reporting()
+        self.assertEqual(self.evaluate_one_rule(rule), ["ERROR"])
+
+    def test_logs_every_time_outside_a_request(self):
+        rule = InclusionRule.objects.first()
+        self.assertEqual(self.evaluate_one_rule(rule), ["ERROR"])
+        self.assertEqual(self.evaluate_one_rule(rule), ["ERROR"])
+
+
+class LifecycleStateRuleTranslationTests(LifecycleTestCase):
+    def test_validation_messages_are_translated(self):
+        bad_id = str(uuid.uuid4())
+        cases = [
+            ({}, []),
+            ({"graphid": bad_id, "lifecycle_state_id": bad_id}, [bad_id]),
+            (
+                {
+                    "graphid": str(self.graph.pk),
+                    "lifecycle_state_id": bad_id,
+                },
+                [bad_id, str(self.graph.pk)],
+            ),
+        ]
+        with mock.patch(
+            "arches_abac_permissions.rules.lifecycle_state_rule._",
+            lambda message: "T:" + message,
+        ):
+            for definition, ids in cases:
+                with self.subTest(definition=definition):
+                    with self.assertRaises(ValidationError) as cm:
+                        LifecycleStateRule.parse_definition(definition)
+                    message = cm.exception.messages[0]
+                    self.assertTrue(message.startswith("T:"))
+                    for value in ids:
+                        self.assertIn(value, message)
+
+    def test_validation_message_text(self):
+        bad_id = str(uuid.uuid4())
+        with self.assertRaisesMessage(
+            ValidationError, f"{bad_id} is not the id of a resource model."
+        ):
+            LifecycleStateRule.parse_definition(
+                {"graphid": bad_id, "lifecycle_state_id": bad_id}
+            )
 
 
 class InclusionRuleValidationTests(LifecycleTestCase):

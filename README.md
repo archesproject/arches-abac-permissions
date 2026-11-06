@@ -290,7 +290,7 @@ Things to be aware of:
 - **Matching is exact.** Text is case sensitive and must match the whole value; dates aren't compared as dates. Numbers with more precision than a float can hold (e.g. `0.1000000000000000000001`) are rejected rather than rounded.
 - Nodes of draft resource models can't be used; publish the model first.
 - Concept and concept-list nodes, and other datatypes, aren't supported.
-- **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
+- **Deleting the node or the resource model breaks the rule.** It then matches nothing, and its error and traceback are logged the first time it fails in each request, then at DEBUG level.
 
 ## Creating a spatial rule
 
@@ -321,7 +321,7 @@ Things to be aware of:
 
 - **The area is a GeoJSON `Polygon` or `MultiPolygon` in longitude/latitude (WGS 84).** Only `type` and `coordinates` are kept, so any `crs` is dropped. It may have at most 10,000 vertices and be at most 180° of longitude wide; areas crossing the antimeridian aren't supported. Overlapping polygons are merged.
 - Nodes of draft resource models can't be used; publish the model first.
-- **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
+- **Deleting the node or the resource model breaks the rule.** It then matches nothing, and its error and traceback are logged the first time it fails in each request, then at DEBUG level.
 
 ## Indexes for rules
 

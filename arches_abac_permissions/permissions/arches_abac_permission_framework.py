@@ -16,6 +16,7 @@ along with this program. If not, see <http://www.gnu.org/licenses/>.
 from __future__ import annotations
 
 import logging
+from contextvars import ContextVar
 
 from django.contrib.auth.models import Group, User
 from django.db import DatabaseError
@@ -29,6 +30,19 @@ from arches.app.search.elasticsearch_dsl_builder import Bool
 from arches.app.search.search import SearchEngine
 
 logger = logging.getLogger(__name__)
+
+# Rules that already logged a traceback during the current request.
+_reported_rules: ContextVar[set | None] = ContextVar(
+    "abac_reported_rules", default=None
+)
+
+
+def start_request_reporting(**kwargs):
+    _reported_rules.set(set())
+
+
+def end_request_reporting(**kwargs):
+    _reported_rules.set(None)
 
 
 class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
@@ -54,18 +68,34 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         return Group.objects.none()
 
     def evaluate_rule(self, rule, evaluate, default):
-        """Run evaluate(rule), treating a rule that raises as matching nothing."""
+        """
+        Run evaluate(rule), treating a rule that raises as matching nothing.
+
+        DatabaseErrors are re-raised. Other errors are logged with a traceback
+        the first time a rule fails in a request, then at DEBUG level.
+        """
         try:
             return evaluate(rule)
         except DatabaseError:
             raise
         except Exception:
-            logger.exception(
-                "Inclusion rule %s (%s) could not be evaluated and is being "
-                "treated as matching nothing.",
-                rule.pk,
-                rule.name,
-            )
+            reported = _reported_rules.get()
+            if reported is None or rule.pk not in reported:
+                logger.exception(
+                    "Inclusion rule %s (%s) could not be evaluated and is being "
+                    "treated as matching nothing.",
+                    rule.pk,
+                    rule.name,
+                )
+                if reported is not None:
+                    reported.add(rule.pk)
+            else:
+                logger.debug(
+                    "Inclusion rule %s (%s) could not be evaluated again in "
+                    "this request.",
+                    rule.pk,
+                    rule.name,
+                )
             return default
 
     def get_abac_perms(
