@@ -112,7 +112,7 @@ pip install -e arches-abac-permissions --group dev
 Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
 
 - **Rules** (left): filter, add, and delete rules.
-- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed); a resource model, node and value for *Resource has Node Value*; or a resource model, geometry node, spatial relationship and an area drawn on a map (or entered as GeoJSON) for *Resource is in Area*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
+- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed); a resource model, node and value for *Resource has Node Value*; or a resource model, geometry node, spatial relationship and an area drawn on a map (or entered as GeoJSON) with an optional buffer for *Resource is in Area*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
 - **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members, or a built-in Arches group (tagged *Built-in*), cannot be deleted. Groups tagged *Public* apply to logged-out visitors, and the plugin warns when such a group is granted access. **Save** stores the rule, its definition and all grants together.
 
 The **Group Membership** view (switch at the top) lists groups, users and an editor. Filter users by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
@@ -306,20 +306,25 @@ With `intersects`, a large or linear geometry (a trail, a county) matches every 
 
 The rule reads Arches' `geojson_geometries` table. Core refreshes it only through `after_update_all`, which runs from the tile views (the resource editor), the importers and ETL modules, and `Tile.update_node_value`. **Tiles saved any other way (`Tile.save()` in the Python API, custom functions, SQL) don't update it**, so a geometry moved out of the area keeps matching until the tile is refreshed. Call `tile.after_update_all()` after such writes, or run `SELECT refresh_geojson_geometries();` to rebuild the table.
 
-Create it in the plugin (*Resource is in Area*), where you draw the area on core's `streets` basemap or paste GeoJSON under **Edit as GeoJSON**, or in the admin with modulename `spatial_rule.py`, classname `SpatialRule` and definition:
+Create it in the plugin (*Resource is in Area*), where you draw the area on the map or paste GeoJSON under **Edit as GeoJSON**, or in the admin with modulename `spatial_rule.py`, classname `SpatialRule` and definition:
 
 ```json
 {
     "graphid": "<id of the resource model>",
     "nodeid": "<id of a geojson-feature-collection node of that model>",
     "geometry": {"type": "Polygon", "coordinates": [[[-0.2, 51.4], [0.1, 51.4], [0.1, 51.6], [-0.2, 51.4]]]},
+    "buffer": 500,
     "operator": "within"
 }
 ```
 
+The map offers every core basemap (a selector appears when there is more than one; `streets` is the default) and core's overlay map layers, which are off until ticked. Under **Edit as GeoJSON** the area is shown as a full GeoJSON `FeatureCollection` that you can copy or paste back; **Copy GeoJSON** puts it on the clipboard.
+
 Things to be aware of:
 
-- **The area is a GeoJSON `Polygon` or `MultiPolygon` in longitude/latitude (WGS 84).** Only `type` and `coordinates` are kept, so any `crs` is dropped. It may have at most 10,000 vertices and be at most 180° of longitude wide; areas crossing the antimeridian aren't supported. Overlapping polygons are merged.
+- **The area is GeoJSON in longitude/latitude (WGS 84):** a polygon, point or line (or their `Multi*` forms), or a flat `GeometryCollection` of them mixing types. Only `type`, `coordinates` and `geometries` are kept, so any `crs` is dropped.
+- **`buffer` is an optional distance in meters (0 to 100,000), and is required for points and lines.** Each part is buffered with PostGIS geography, so the distance is accurate at any latitude, and the buffered parts are merged. The map previews the buffer with Turf, but the backend result is authoritative. The buffered area must stay within the limits below.
+- The area may have at most 10,000 vertices and be at most 180° of longitude wide; areas crossing the antimeridian aren't supported. Overlapping polygons are merged.
 - Nodes of draft resource models can't be used; publish the model first.
 - **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
 

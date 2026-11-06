@@ -1,9 +1,11 @@
 import json
+import math
 from functools import lru_cache
 
 from django.contrib.gis.db.models.functions import Centroid
 from django.contrib.gis.gdal import GDALException
 from django.contrib.gis.geos import GEOSException, GEOSGeometry
+from django.db import connection
 from django.core.exceptions import ValidationError
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
@@ -18,7 +20,15 @@ from arches_abac_permissions.models import InclusionRule
 from arches_abac_permissions.rule_types import RuleType
 
 GEOMETRY_DATATYPE = "geojson-feature-collection"
-GEOMETRY_TYPES = ("Polygon", "MultiPolygon")
+POLYGONAL_TYPES = ("Polygon", "MultiPolygon")
+SIMPLE_TYPES = POLYGONAL_TYPES + (
+    "Point",
+    "MultiPoint",
+    "LineString",
+    "MultiLineString",
+)
+COLLECTION = "GeometryCollection"
+MAX_BUFFER = 100000  # meters
 MAX_VERTICES = 10000
 # Geometries are stored in EPSG:3857, which is undefined beyond this latitude.
 MAX_LATITUDE = 85.05112878
@@ -38,7 +48,9 @@ class SpatialRule(InclusionRule):
     definition: {
         "graphid": "<graph id>",
         "nodeid": "<geojson-feature-collection node id>",
-        "geometry": <GeoJSON Polygon or MultiPolygon in EPSG:4326>,
+        "geometry": <GeoJSON Polygon, Point, LineString, their Multi*
+                     variants or a flat GeometryCollection, in EPSG:4326>,
+        "buffer": <meters, optional; required for points and lines>,
         "operator": "intersects" (default) | "within" | "centroid"
     }
 
@@ -53,24 +65,24 @@ class SpatialRule(InclusionRule):
             "Matches resources by where their geometry lies relative to an area"
         ),
         icon="pi pi-map",
-        definition_keys=("graphid", "nodeid", "geometry", "operator"),
+        definition_keys=("graphid", "nodeid", "geometry", "buffer", "operator"),
     )
 
     @classmethod
     def clean_definition(cls, raw_definition, definition_keys):
         definition = super().clean_definition(
-            raw_definition, [key for key in definition_keys if key != "geometry"]
+            raw_definition,
+            [key for key in definition_keys if key not in ("geometry", "buffer")],
         )
         definition.setdefault("operator", INTERSECTS)
         geometry = raw_definition.get("geometry")
         if isinstance(geometry, dict):
             # Drop other members (e.g. "crs"); they're ignored anyway.
-            geometry = {
-                "type": geometry.get("type"),
-                "coordinates": geometry.get("coordinates"),
-            }
+            geometry = strip_geometry(geometry)
         if geometry is not None:
             definition["geometry"] = geometry
+        if raw_definition.get("buffer") is not None:
+            definition["buffer"] = raw_definition["buffer"]
         return definition
 
     @classmethod
@@ -179,39 +191,86 @@ class SpatialRule(InclusionRule):
             )
         if node.datatype != GEOMETRY_DATATYPE:
             raise ValidationError(_("The node must be a geometry node."))
-        return node, cls.parse_geometry(geometry), operator
+        return (
+            node,
+            cls.parse_geometry(geometry, definition.get("buffer")),
+            operator,
+        )
 
     @staticmethod
-    def parse_geometry(geometry):
-        if not isinstance(geometry, dict) or geometry.get("type") not in GEOMETRY_TYPES:
-            raise ValidationError(_("The area must be a Polygon or MultiPolygon."))
-        # Only type and coordinates are read, so a "crs" member can't
-        # reinterpret the coordinates.
-        try:
-            canonical = json.dumps(
-                {"type": geometry["type"], "coordinates": geometry.get("coordinates")},
-                sort_keys=True,
+    def parse_geometry(geometry, buffer=None):
+        """Return the area for a geometry and optional buffer in meters."""
+        if not isinstance(geometry, dict):
+            raise ValidationError(_("The area must be a GeoJSON geometry."))
+        geometry_type = geometry.get("type")
+        if geometry_type == COLLECTION:
+            members = geometry.get("geometries")
+            if not isinstance(members, list) or not all(
+                isinstance(member, dict) and member.get("type") in SIMPLE_TYPES
+                for member in members
+            ):
+                raise ValidationError(
+                    _("A geometry collection can only hold simple geometries.")
+                )
+        elif geometry_type not in SIMPLE_TYPES:
+            raise ValidationError(
+                _("The area must be a Polygon, Point, LineString or a collection.")
             )
+        buffer = validate_buffer(buffer)
+        # Only type, coordinates and geometries are read, so a "crs" member
+        # can't reinterpret the coordinates.
+        try:
+            canonical = json.dumps(strip_geometry(geometry), sort_keys=True)
         except (ValueError, TypeError):
             raise ValidationError(_("The area is not valid GeoJSON."))
         # Copied so callers can't change the cached area.
-        return parse_area(canonical).clone()
+        return parse_area(canonical, buffer).clone()
 
     class Meta:
         proxy = True
         app_label = "arches_abac_permissions"
 
 
-@lru_cache(maxsize=256)
-def parse_area(canonical_geojson):
-    """
-    Validate and union an area. Cached since every permission check of a
-    rule parses the same area.
-    """
-    try:
-        area = GEOSGeometry(canonical_geojson, srid=4326)
-    except (GEOSException, GDALException, ValueError, TypeError):
-        raise ValidationError(_("The area is not valid GeoJSON."))
+def strip_geometry(geometry):
+    """Keep only the members that are read; other values pass through."""
+    if not isinstance(geometry, dict):
+        return geometry
+    if geometry.get("type") == COLLECTION:
+        members = geometry.get("geometries")
+        return {
+            "type": COLLECTION,
+            "geometries": (
+                [strip_geometry(member) for member in members]
+                if isinstance(members, list)
+                else members
+            ),
+        }
+    return {"type": geometry.get("type"), "coordinates": geometry.get("coordinates")}
+
+
+def validate_buffer(buffer):
+    if buffer is None:
+        return 0
+    if (
+        isinstance(buffer, bool)
+        or not isinstance(buffer, (int, float))
+        or not math.isfinite(buffer)
+        or not 0 <= buffer <= MAX_BUFFER
+    ):
+        raise ValidationError(
+            _("The buffer must be a number of meters from 0 to %d.") % MAX_BUFFER
+        )
+    return float(buffer)
+
+
+def simple_parts(geometry):
+    """Flatten Multi* geometries and collections into simple geometries."""
+    if geometry.geom_type.startswith("Multi") or geometry.geom_type == COLLECTION:
+        return [part for member in geometry for part in simple_parts(member)]
+    return [geometry]
+
+
+def check_bounds(area):
     if area.empty:
         raise ValidationError(_("The area is empty."))
     if area.num_coords > MAX_VERTICES:
@@ -230,10 +289,44 @@ def parse_area(canonical_geojson):
             )
             % MAX_LONGITUDE_SPAN
         )
+
+
+def buffer_parts(parts, buffer):
+    """Buffer by meters using PostGIS geography, merged in one query."""
+    with connection.cursor() as cursor:
+        cursor.execute(
+            "SELECT ST_AsEWKB(ST_Union(ST_Buffer(ST_GeomFromEWKB(g)::geography, %s)::geometry))"
+            " FROM unnest(%s::bytea[]) AS g",
+            (buffer, [bytes(part.ewkb) for part in parts]),
+        )
+        area = GEOSGeometry(memoryview(cursor.fetchone()[0]))
+    area.srid = 4326
+    return area
+
+
+@lru_cache(maxsize=256)
+def parse_area(canonical_geojson, buffer=0):
+    """
+    Validate, buffer and union an area. Cached since every permission check
+    of a rule parses the same area.
+    """
+    try:
+        area = GEOSGeometry(canonical_geojson, srid=4326)
+    except (GEOSException, GDALException, ValueError, TypeError):
+        raise ValidationError(_("The area is not valid GeoJSON."))
+    check_bounds(area)
+    parts = simple_parts(area)
     # Separately drawn polygons may overlap, so check each and union them.
-    for polygon in area if area.geom_type == "MultiPolygon" else [area]:
-        if not polygon.valid:
+    for part in parts:
+        if part.geom_type == "Polygon" and not part.valid:
             raise ValidationError(
-                _("The area is not a valid polygon: %s") % polygon.valid_reason
+                _("The area is not a valid polygon: %s") % part.valid_reason
             )
+    if buffer > 0:
+        area = buffer_parts(parts, buffer).unary_union
+        area.srid = 4326
+        check_bounds(area)
+        return area
+    if any(part.geom_type not in POLYGONAL_TYPES for part in parts):
+        raise ValidationError(_("Points and lines need a buffer greater than 0."))
     return area.unary_union
