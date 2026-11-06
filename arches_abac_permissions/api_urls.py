@@ -6,8 +6,11 @@ from arches_abac_permissions.membership_views import (
     UserView,
 )
 from arches_abac_permissions.views import (
+    ControlledListItemsView,
     GroupsView,
     GroupView,
+    LanguagesView,
+    ResourceModelNodesView,
     ResourceModelsView,
     ResourceSetsView,
     RulesView,
@@ -23,6 +26,17 @@ urlpatterns = [
         "api/abac/resource_models",
         ResourceModelsView.as_view(),
         name="abac_resource_models",
+    ),
+    path(
+        "api/abac/resource_models/<uuid:graph_id>/nodes",
+        ResourceModelNodesView.as_view(),
+        name="abac_resource_model_nodes",
+    ),
+    path("api/abac/languages", LanguagesView.as_view(), name="abac_languages"),
+    path(
+        "api/abac/controlled_lists/<uuid:list_id>/items",
+        ControlledListItemsView.as_view(),
+        name="abac_controlled_list_items",
     ),
     path(
         "api/abac/resource_sets", ResourceSetsView.as_view(), name="abac_resource_sets"

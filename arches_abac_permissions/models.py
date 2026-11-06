@@ -51,6 +51,14 @@ class InclusionRule(models.Model):
         definition; the default accepts any definition.
         """
 
+    @classmethod
+    def get_index_sql(cls, inclusion_rule):
+        """
+        Return SQL creating an index that speeds up evaluating this rule, or
+        None if no additional index is needed.
+        """
+        return None
+
     def clean(self):
         super().clean()
         if not self.modulename or not self.classname:
@@ -87,6 +95,9 @@ class InclusionRule(models.Model):
 
     def get_matching_resources(self):
         return self.get_class_module().get_matching_resources(self)
+
+    def get_index_sql_for_rule(self):
+        return self.get_class_module().get_index_sql(self)
 
     def __str__(self):
         return self.name
