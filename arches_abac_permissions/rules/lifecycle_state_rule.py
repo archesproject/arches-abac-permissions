@@ -78,12 +78,18 @@ class LifecycleStateRule(InclusionRule):
         stateid = definition.get("lifecycle_state_id")
         if not graphid or not stateid:
             raise ValidationError(
-                "Lifecycle state rules require a 'graphid' and a 'lifecycle_state_id'."
+                gettext_lazy(
+                    "Lifecycle state rules require a 'graphid' and a "
+                    "'lifecycle_state_id'."
+                )
             )
         try:
             graph = GraphModel.objects.get(pk=graphid, isresource=True)
         except (GraphModel.DoesNotExist, ValidationError):
-            raise ValidationError(f"{graphid} is not the id of a resource model.")
+            raise ValidationError(
+                gettext_lazy("%(graphid)s is not the id of a resource model.")
+                % {"graphid": graphid}
+            )
         try:
             state = ResourceInstanceLifecycleState.objects.get(
                 pk=stateid,
@@ -91,7 +97,10 @@ class LifecycleStateRule(InclusionRule):
             )
         except (ResourceInstanceLifecycleState.DoesNotExist, ValidationError):
             raise ValidationError(
-                f"{stateid} is not the id of a lifecycle state of graph {graphid}."
+                gettext_lazy(
+                    "%(stateid)s is not the id of a lifecycle state of graph %(graphid)s."
+                )
+                % {"stateid": stateid, "graphid": graphid}
             )
         return graph, state
 
