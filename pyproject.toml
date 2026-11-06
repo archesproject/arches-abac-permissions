@@ -23,16 +23,16 @@ classifiers = [
 ]
 requires-python = ">=3.12"
 dependencies = [
-    "arches>=8.2.0a13,<8.3.0",
+    "arches>=8.2.0a23,<8.3.0",
 ]
 version = "0.1.0a0"
 
 [project.optional-dependencies]
-arches-resource-sets = ["arches-resource-sets>=0.1.0a2"]
+arches-resource-sets = ["arches-resource-sets>=0.1.0a4"]
 
 [dependency-groups]
 dev = [
-    "arches-resource-sets>=0.1.0a2",
+    "arches-resource-sets>=0.1.0a4",
     "black==26.3.1",
     "coverage",
     "django-silk==5.5.0",

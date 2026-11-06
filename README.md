@@ -19,7 +19,7 @@ To make it a dependency of your project, add the same requirement to the `depend
 
 ```bash
 dependencies = [
-    "arches>=8.2.0a13,<8.3.0",
+    "arches>=8.2.0a23,<8.3.0",
     "arches-abac-permissions @ git+https://github.com/archesproject/arches-abac-permissions.git@main",
 ]
 ```

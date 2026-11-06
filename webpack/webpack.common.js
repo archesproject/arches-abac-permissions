@@ -12,6 +12,9 @@ const { requireVueLoaderWithTypeResolutionPatch } = require('./webpack-utils/pat
 const { VueLoaderPlugin } = requireVueLoaderWithTypeResolutionPatch();
 
 const { buildFilepathLookup } = require('./webpack-utils/build-filepath-lookup');
+const { markCoreComponents } = require('./webpack-utils/mark-core-components');
+const { postcssLegacyFence } = require('./webpack-utils/postcss-legacy-fence');
+const { postcssRemCorrection } = require('./webpack-utils/postcss-rem-correction');
 
 module.exports = () => {
     return new Promise((resolve, _reject) => {
@@ -410,6 +413,12 @@ module.exports = () => {
                         test: /\.vue$/,
                         exclude: /node_modules/,
                         loader: Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'vue-loader'),
+                        options: {
+                            compilerOptions: {
+                                // marks core component roots, where the legacy stylesheet fence stops
+                                nodeTransforms: [markCoreComponents(Path.resolve(__dirname, ROOT_DIR))],
+                            },
+                        },
                     },
                     {
                         test: /maplibre-gl-worker(-dev)?\.mjs$/,
@@ -425,6 +434,12 @@ module.exports = () => {
                         generator: {
                             filename: 'js/[name][ext]',
                         },
+                    },
+                    {
+                        // Keep maplibre-gl's runtime `new URL(expression, import.meta.url)` intact
+                        // instead of becoming an empty context that throws (maplibre/maplibre-gl-js#8060).
+                        test: /maplibre-gl(-dev)?\.mjs$/,
+                        parser: { dynamicUrl: false },
                     },
                     {
                         test: /\.mjs$/,
@@ -456,6 +471,16 @@ module.exports = () => {
                             {
                                 'loader': Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'css-loader'),
                             },
+                            {
+                                'loader': Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'postcss-loader'),
+                                options: {
+                                    postcssOptions: {
+                                        config: false,
+                                        // Arches core's Vue styles were written for the chrome's 0.62rem root
+                                        plugins: [postcssRemCorrection({ chromeRootDirectories: [Path.resolve(__dirname, ROOT_DIR)] })],
+                                    },
+                                },
+                            },
                         ],
                     },
                     {
@@ -473,9 +498,21 @@ module.exports = () => {
                             },
                             {
                                 'loader': Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'css-loader'),
+                                options: {
+                                    importLoaders: 1,  // run @import-ed vendor css through postcss too, so it's fenced
+                                },
                             },
                             {
                                 'loader': Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'postcss-loader'),
+                                options: {
+                                    postcssOptions: {
+                                        config: false,
+                                        plugins: [
+                                            postcssRemCorrection(),
+                                            postcssLegacyFence({ boundary: '[data-arches-core]' }),
+                                        ],
+                                    },
+                                },
                             },
                             {
                                 'loader': Path.join(PROJECT_RELATIVE_NODE_MODULES_PATH, 'sass-loader'),

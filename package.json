@@ -18,13 +18,18 @@
         "vitest": "vitest --run --coverage"
     },
     "dependencies": {
-        "arches": "github:archesproject/arches#v8.2.0-alpha.13"
+        "arches": "github:archesproject/arches#v8.2.0-alpha.23"
     },
     "nodeModulesPaths": {},
     "overrides": {
+        "@vitest/coverage-v8": "5.0.5",
+        "jsdom": "24.1.3",
         "moment-timezone": "^0.5.45",
         "nomnom": "npm:@gerhobbelt/nomnom",
+        "postcss": "8.5.23",
         "rimraf": "^5.0.7",
-        "underscore": "^1.13.6"
+        "sass": "1.78.0",
+        "underscore": "^1.13.6",
+        "vitest": "5.0.5"
     }
 }
