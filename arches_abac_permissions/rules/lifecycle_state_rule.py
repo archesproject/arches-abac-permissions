@@ -48,6 +48,10 @@ class LifecycleStateRule(InclusionRule):
             and resource.resource_instance_lifecycle_state_id == state.pk
         )
 
+    @classmethod
+    def validate_definition(cls, inclusion_rule):
+        cls.parse_definition(inclusion_rule.definition)
+
     @staticmethod
     def parse_definition(definition):
         graphid = definition.get("graphid")
