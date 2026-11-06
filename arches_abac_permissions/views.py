@@ -404,25 +404,51 @@ class ControlledListItemsView(SuperuserAPIView):
 
 
 class MapConfigView(SuperuserAPIView):
-    """Core's streets basemap and defaults for drawing a spatial rule's area."""
+    """Core's basemaps and overlays plus defaults for drawing a spatial rule's area."""
 
     def get(self, request):
-        basemap = None
-        layer = MapLayer.objects.filter(name=STREETS_BASEMAP, isoverlay=False).first()
-        if layer:
-            definitions = [
+        layers = list(MapLayer.objects.order_by("sortorder", "name"))
+        definitions = {
+            layer.pk: [
                 definition
                 for definition in layer.layerdefinitions or []
                 if isinstance(definition, dict)
             ]
-            names = {definition.get("source") for definition in definitions}
-            basemap = {
-                "layers": definitions,
+            for layer in layers
+        }
+        layers = [layer for layer in layers if definitions[layer.pk]]
+        names = {
+            definition.get("source")
+            for layer in layers
+            for definition in definitions[layer.pk]
+        }
+        sources = {
+            source.name: source.source
+            for source in MapSource.objects.filter(name__in=names)
+        }
+
+        def serialize(layer):
+            layer_names = {
+                definition.get("source") for definition in definitions[layer.pk]
+            }
+            return {
+                "name": str(layer.name),
+                "layers": definitions[layer.pk],
                 "sources": {
-                    source.name: source.source
-                    for source in MapSource.objects.filter(name__in=names)
+                    name: source
+                    for name, source in sources.items()
+                    if name in layer_names
                 },
             }
+
+        basemap_layers = [layer for layer in layers if not layer.isoverlay]
+        default = next(
+            (layer for layer in basemap_layers if str(layer.name) == STREETS_BASEMAP),
+            None,
+        ) or next(
+            (layer for layer in basemap_layers if layer.addtomap),
+            basemap_layers[0] if basemap_layers else None,
+        )
         bounds = (
             GeoUtils().get_bounds_from_geojson(settings.DEFAULT_BOUNDS)
             if settings.DEFAULT_BOUNDS
@@ -430,7 +456,9 @@ class MapConfigView(SuperuserAPIView):
         )
         return JSONResponse(
             {
-                "basemap": basemap,
+                "basemaps": [serialize(layer) for layer in basemap_layers],
+                "overlays": [serialize(layer) for layer in layers if layer.isoverlay],
+                "default_basemap": str(default.name) if default else None,
                 "bounds": list(bounds) if bounds else None,
                 "min_zoom": settings.MAP_MIN_ZOOM,
                 "max_zoom": settings.MAP_MAX_ZOOM,

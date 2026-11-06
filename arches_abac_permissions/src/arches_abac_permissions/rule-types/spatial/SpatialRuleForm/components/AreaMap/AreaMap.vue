@@ -9,21 +9,25 @@ import {
     setWorkerUrl,
 } from "maplibre-gl";
 import "maplibre-gl/dist/maplibre-gl.css";
+import bufferGeometry from "@turf/buffer";
 
 import Button from "openvue/button";
+import Checkbox from "openvue/checkbox";
+import Select from "openvue/select";
 
 import {
     areaOf,
-    polygonsOf,
+    partsOf,
+    positionsOf,
+    toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
+import {
+    buildStyle,
+    layerIdsOf,
+} from "@/arches_abac_permissions/rule-types/spatial/map-style.ts";
 
-import type { Feature, FeatureCollection, Polygon, Position } from "geojson";
-import type {
-    IControl,
-    LayerSpecification,
-    LngLatBoundsLike,
-    StyleSpecification,
-} from "maplibre-gl";
+import type { Feature, FeatureCollection } from "geojson";
+import type { GeoJSONSource, IControl, LngLatBoundsLike } from "maplibre-gl";
 import type {
     AreaGeometry,
     MapConfig,
@@ -45,16 +49,33 @@ setWorkerUrl(
 new URL("maplibre-gl/dist/maplibre-gl-shared.mjs?asset", import.meta.url);
 
 const DRAW_POLYGON = "draw_polygon";
+const DRAW_POINT = "draw_point";
+const DRAW_LINE = "draw_line_string";
 const SIMPLE_SELECT = "simple_select";
+const BUFFER_SOURCE = "abac-buffer-preview";
+const BUFFER_FILL_LAYER = "abac-buffer-preview-fill";
+const BUFFER_LINE_LAYER = "abac-buffer-preview-line";
+const BUFFER_COLOR = "#e07b00";
+const BUFFER_FILL_OPACITY = 0.25;
+const BUFFER_LINE_WIDTH = 2;
+const BASEMAP_SELECT_ID = "abac-basemap";
 
-const props = defineProps<{ config: MapConfig; describedBy?: string }>();
+const props = defineProps<{
+    config: MapConfig;
+    buffer?: number;
+    describedBy?: string;
+}>();
 const area = defineModel<AreaGeometry | undefined>({ required: true });
 
 const { $gettext, $ngettext } = useGettext();
 
 const container = ref<HTMLElement>();
-const isDrawing = ref(false);
+const drawMode = ref(SIMPLE_SELECT);
 const hasSelection = ref(false);
+const selectedBasemap = ref<string | null>(
+    props.config.default_basemap ?? props.config.basemaps[0]?.name ?? null,
+);
+const visibleOverlays = ref<Record<string, boolean>>({});
 
 let map: MapLibreMap | null = null;
 let draw: DrawControl | null = null;
@@ -62,16 +83,39 @@ let draw: DrawControl | null = null;
 let syncedArea = "";
 let isLoaded = false;
 
-const polygonCount = computed(() => polygonsOf(area.value).length);
-const status = computed(() =>
-    polygonCount.value
-        ? $ngettext(
-              "The area has %{count} polygon.",
-              "The area has %{count} polygons.",
-              polygonCount.value,
-              { count: String(polygonCount.value) },
-          )
-        : $gettext("No area has been drawn."),
+const parts = computed(() => partsOf(area.value));
+const partCount = computed(() => parts.value.length);
+const status = computed(() => {
+    const counts = [
+        {
+            types: ["Polygon"],
+            one: "%{count} polygon",
+            many: "%{count} polygons",
+        },
+        { types: ["Point"], one: "%{count} point", many: "%{count} points" },
+        { types: ["LineString"], one: "%{count} line", many: "%{count} lines" },
+    ]
+        .map(({ types, one, many }) => {
+            const count = parts.value.filter((part) =>
+                types.includes(part.type),
+            ).length;
+            return count
+                ? $ngettext(one, many, count, { count: String(count) })
+                : "";
+        })
+        .filter(Boolean);
+    return counts.length
+        ? $gettext("The area has %{counts}.", { counts: counts.join(", ") })
+        : $gettext("No area has been drawn.");
+});
+const isDrawing = computed(() => drawMode.value !== SIMPLE_SELECT);
+const showBasemapSelect = computed(() => props.config.basemaps.length > 1);
+
+watch(selectedBasemap, applyVisibility);
+watch(visibleOverlays, applyVisibility, { deep: true });
+watch(
+    () => props.buffer,
+    () => showBuffer(area.value),
 );
 
 watch(area, (geometry) => {
@@ -84,7 +128,7 @@ onMounted(() => {
     const bounds = boundsOf(area.value) ?? props.config.bounds ?? undefined;
     map = new MapLibreMap({
         container: container.value!,
-        style: buildStyle(),
+        style: buildStyle(props.config),
         bounds,
         fitBoundsOptions: { padding: 40, maxZoom: 16 },
         minZoom: props.config.min_zoom,
@@ -103,13 +147,15 @@ onMounted(() => {
     map.addControl(draw);
     map.on("load", () => {
         isLoaded = true;
+        addBufferLayers();
+        applyVisibility();
         showArea(area.value, false);
     });
     onDraw("draw.create", readArea);
     onDraw("draw.update", readArea);
     onDraw("draw.delete", readArea);
     onDraw<{ mode: string }>("draw.modechange", (event) => {
-        isDrawing.value = event.mode === DRAW_POLYGON;
+        drawMode.value = event.mode;
     });
     onDraw<{ features: Feature[] }>("draw.selectionchange", (event) => {
         hasSelection.value = event.features.length > 0;
@@ -123,25 +169,89 @@ onBeforeUnmount(() => {
     isLoaded = false;
 });
 
-// Layers without their source are dropped; one would stop the style loading.
-function buildStyle(): StyleSpecification {
-    const sources = props.config.basemap?.sources ?? {};
-    const layers = (props.config.basemap?.layers ?? []).filter(
-        (layer) => !layer.source || (layer.source as string) in sources,
-    );
-    return {
-        version: 8,
-        ...(props.config.sprite ? { sprite: props.config.sprite } : {}),
-        ...(props.config.glyphs ? { glyphs: props.config.glyphs } : {}),
-        sources,
-        layers: layers as LayerSpecification[],
-    } as StyleSpecification;
+// Only visibility changes; setStyle would drop the draw layers.
+function applyVisibility(): void {
+    if (!map || !isLoaded) {
+        return;
+    }
+    const entries = [
+        ...props.config.basemaps.map((entry) => ({
+            name: entry.name,
+            isVisible: entry.name === selectedBasemap.value,
+        })),
+        ...props.config.overlays.map((entry) => ({
+            name: entry.name,
+            isVisible: Boolean(visibleOverlays.value[entry.name]),
+        })),
+    ];
+    for (const { name, isVisible } of entries) {
+        for (const id of layerIdsOf(props.config, name)) {
+            if (map.getLayer(id)) {
+                map.setLayoutProperty(
+                    id,
+                    "visibility",
+                    isVisible ? "visible" : "none",
+                );
+            }
+        }
+    }
+}
+
+function addBufferLayers(): void {
+    if (!map) {
+        return;
+    }
+    map.addSource(BUFFER_SOURCE, {
+        type: "geojson",
+        data: { type: "FeatureCollection", features: [] },
+    });
+    map.addLayer({
+        id: BUFFER_FILL_LAYER,
+        type: "fill",
+        source: BUFFER_SOURCE,
+        paint: {
+            "fill-color": BUFFER_COLOR,
+            "fill-opacity": BUFFER_FILL_OPACITY,
+        },
+    });
+    map.addLayer({
+        id: BUFFER_LINE_LAYER,
+        type: "line",
+        source: BUFFER_SOURCE,
+        paint: { "line-color": BUFFER_COLOR, "line-width": BUFFER_LINE_WIDTH },
+    });
+    showBuffer(area.value);
+}
+
+// A preview only; the backend computes the authoritative buffer.
+function showBuffer(geometry: AreaGeometry | undefined): void {
+    const source = map?.getSource(BUFFER_SOURCE) as GeoJSONSource | undefined;
+    if (!source) {
+        return;
+    }
+    let preview: FeatureCollection = {
+        type: "FeatureCollection",
+        features: [],
+    };
+    if (props.buffer && props.buffer > 0 && geometry) {
+        try {
+            const buffered = bufferGeometry(
+                toFeatureCollection(geometry),
+                props.buffer,
+                {
+                    units: "meters",
+                },
+            );
+            preview = buffered ?? preview;
+        } catch {
+            preview = { type: "FeatureCollection", features: [] };
+        }
+    }
+    source.setData(preview);
 }
 
 function boundsOf(geometry: AreaGeometry | undefined): LngLatBoundsLike | null {
-    const positions: Position[] = polygonsOf(geometry).flatMap(
-        (polygon) => polygon.coordinates.flat() as Position[],
-    );
+    const positions = positionsOf(geometry);
     if (!positions.length) {
         return null;
     }
@@ -158,10 +268,8 @@ function showArea(geometry: AreaGeometry | undefined, fit: boolean): void {
     if (!draw || !isLoaded) {
         return;
     }
-    const features: Feature<Polygon>[] = polygonsOf(geometry).map(
-        (polygon) => ({ type: "Feature", properties: {}, geometry: polygon }),
-    );
-    draw.set({ type: "FeatureCollection", features });
+    draw.set(toFeatureCollection(geometry));
+    showBuffer(geometry);
     hasSelection.value = false;
     const bounds = boundsOf(geometry);
     if (fit && bounds && map) {
@@ -179,11 +287,13 @@ function readArea(): void {
     const next = areaOf(geometries);
     syncedArea = JSON.stringify(next ?? null);
     area.value = next;
+    showBuffer(next);
 }
 
-function startDrawing(): void {
-    draw?.changeMode(isDrawing.value ? SIMPLE_SELECT : DRAW_POLYGON);
-    isDrawing.value = !isDrawing.value;
+function toggleDrawing(mode: string): void {
+    const next = drawMode.value === mode ? SIMPLE_SELECT : mode;
+    draw?.changeMode(next);
+    drawMode.value = next;
 }
 
 function deleteSelected(): void {
@@ -193,7 +303,7 @@ function deleteSelected(): void {
 
 function clearArea(): void {
     draw?.deleteAll();
-    isDrawing.value = false;
+    drawMode.value = SIMPLE_SELECT;
     readArea();
 }
 
@@ -210,6 +320,46 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
 <template>
     <div class="area-map">
         <div
+            v-if="showBasemapSelect || config.overlays.length"
+            class="map-layers"
+        >
+            <div
+                v-if="showBasemapSelect"
+                class="layer-field"
+            >
+                <label :for="BASEMAP_SELECT_ID">{{
+                    $gettext("Basemap")
+                }}</label>
+                <Select
+                    v-model="selectedBasemap"
+                    :input-id="BASEMAP_SELECT_ID"
+                    :options="config.basemaps"
+                    option-label="name"
+                    option-value="name"
+                />
+            </div>
+            <fieldset
+                v-if="config.overlays.length"
+                class="overlays"
+            >
+                <legend>{{ $gettext("Overlays") }}</legend>
+                <div
+                    v-for="overlay in config.overlays"
+                    :key="overlay.name"
+                    class="overlay-option"
+                >
+                    <Checkbox
+                        v-model="visibleOverlays[overlay.name]"
+                        :input-id="`abac-overlay-${overlay.name}`"
+                        :binary="true"
+                    />
+                    <label :for="`abac-overlay-${overlay.name}`">{{
+                        overlay.name
+                    }}</label>
+                </div>
+            </fieldset>
+        </div>
+        <div
             class="area-toolbar"
             role="toolbar"
             :aria-label="$gettext('Area tools')"
@@ -218,12 +368,34 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
                 size="small"
                 icon="pi pi-pencil"
                 :label="
-                    isDrawing
+                    drawMode === DRAW_POLYGON
                         ? $gettext('Stop Drawing')
                         : $gettext('Draw Polygon')
                 "
-                :aria-pressed="isDrawing"
-                @click="startDrawing"
+                :aria-pressed="drawMode === DRAW_POLYGON"
+                @click="toggleDrawing(DRAW_POLYGON)"
+            />
+            <Button
+                size="small"
+                icon="pi pi-map-marker"
+                :label="
+                    drawMode === DRAW_POINT
+                        ? $gettext('Stop Drawing')
+                        : $gettext('Draw Point')
+                "
+                :aria-pressed="drawMode === DRAW_POINT"
+                @click="toggleDrawing(DRAW_POINT)"
+            />
+            <Button
+                size="small"
+                icon="pi pi-minus"
+                :label="
+                    drawMode === DRAW_LINE
+                        ? $gettext('Stop Drawing')
+                        : $gettext('Draw Line')
+                "
+                :aria-pressed="drawMode === DRAW_LINE"
+                @click="toggleDrawing(DRAW_LINE)"
             />
             <Button
                 size="small"
@@ -240,7 +412,7 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
                 variant="outlined"
                 icon="pi pi-times"
                 :label="$gettext('Clear Area')"
-                :disabled="!polygonCount"
+                :disabled="!partCount"
                 @click="clearArea"
             />
         </div>
@@ -269,6 +441,42 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     flex-direction: column;
     gap: 0.8rem;
     max-inline-size: 90rem;
+}
+
+.map-layers {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: flex-end;
+    gap: 1.6rem;
+}
+
+.layer-field,
+.overlay-option {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.layer-field {
+    flex-direction: column;
+    min-inline-size: 20rem;
+}
+
+.overlays {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 1.2rem;
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.overlays legend {
+    padding: 0;
+    margin-block-end: 0.6rem;
+}
+
+.overlay-option {
+    align-items: center;
 }
 
 .area-toolbar {

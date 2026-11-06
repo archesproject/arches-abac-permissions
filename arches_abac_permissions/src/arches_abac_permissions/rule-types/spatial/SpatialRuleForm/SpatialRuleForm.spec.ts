@@ -19,7 +19,7 @@ vi.mock("openvue/usetoast", () => ({ useToast: () => ({ add: toastAdd }) }));
 
 const AreaMapStub = {
     name: "AreaMap",
-    props: ["modelValue", "config", "describedBy"],
+    props: ["modelValue", "config", "buffer", "describedBy"],
     template: "<div class='area-map-stub' />",
 };
 
@@ -31,6 +31,12 @@ const stubs = {
     },
     Message: { template: "<div role='alert'><slot /></div>" },
     ProgressSpinner: true,
+    InputNumber: {
+        name: "InputNumber",
+        props: ["modelValue"],
+        emits: ["update:modelValue"],
+        template: "<input type='number' :value='modelValue' />",
+    },
     Select: true,
     Textarea: {
         props: ["modelValue"],
@@ -82,7 +88,9 @@ describe("SpatialRuleForm", () => {
             { graphid: "g", name: "Places" },
         ]);
         api.fetchMapConfig.mockResolvedValue({
-            basemap: null,
+            basemaps: [],
+            overlays: [],
+            default_basemap: null,
             bounds: null,
             min_zoom: 0,
             max_zoom: 20,
@@ -126,7 +134,7 @@ describe("SpatialRuleForm", () => {
             .findAll("button")
             .find((button) => button.text().includes("Apply GeoJSON"))!;
 
-        await textarea.setValue('{"type": "Point", "coordinates": [0, 0]}');
+        await textarea.setValue('{"type": "Circle", "coordinates": [0, 0]}');
         await apply.trigger("click");
         expect(wrapper.find("[role='alert']").exists()).toBe(true);
         expect(textarea.attributes("aria-describedby")).toBe(
@@ -141,11 +149,102 @@ describe("SpatialRuleForm", () => {
         wrapper.unmount();
     });
 
+    it("sets and clears the buffer and passes it to the map", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        const input = wrapper.findComponent({ name: "InputNumber" });
+        expect(input.attributes("aria-describedby")).toBe("abac-buffer-help");
+        expect(wrapper.find("#abac-buffer-help").text()).toContain(
+            "greater than 0",
+        );
+        input.vm.$emit("update:modelValue", 250);
+        await flushPromises();
+        expect(lastDefinition(wrapper).buffer).toBe(250);
+        expect(wrapper.findComponent(AreaMapStub).props("buffer")).toBe(250);
+        input.vm.$emit("update:modelValue", 0);
+        await flushPromises();
+        expect("buffer" in lastDefinition(wrapper)).toBe(false);
+        input.vm.$emit("update:modelValue", 5);
+        await flushPromises();
+        input.vm.$emit("update:modelValue", null);
+        await flushPromises();
+        expect("buffer" in lastDefinition(wrapper)).toBe(false);
+        wrapper.unmount();
+    });
+
+    it("shows the area as a FeatureCollection and copies it", async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.assign(navigator, { clipboard: { writeText } });
+        const wrapper = mountForm({
+            graphid: "g",
+            nodeid: "n",
+            geometry: square,
+        });
+        await flushPromises();
+        wrapper.find("details").element.setAttribute("open", "");
+        await wrapper.find("details").trigger("toggle");
+        const text = (
+            wrapper.find("#abac-area-geojson").element as HTMLTextAreaElement
+        ).value;
+        expect(JSON.parse(text)).toEqual({
+            type: "FeatureCollection",
+            features: [{ type: "Feature", properties: {}, geometry: square }],
+        });
+
+        const copy = wrapper
+            .findAll("button")
+            .find((button) => button.text().includes("Copy GeoJSON"))!;
+        await copy.trigger("click");
+        await flushPromises();
+        expect(JSON.parse(writeText.mock.calls[0][0]).type).toBe(
+            "FeatureCollection",
+        );
+        expect(toastAdd).toHaveBeenCalledWith(
+            expect.objectContaining({ severity: "success" }),
+        );
+
+        writeText.mockRejectedValue(new Error("denied"));
+        await copy.trigger("click");
+        await flushPromises();
+        expect(toastAdd).toHaveBeenLastCalledWith(
+            expect.objectContaining({ severity: "error", detail: "denied" }),
+        );
+        wrapper.unmount();
+    });
+
+    it("disables copying when there is no area", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        const copy = wrapper
+            .findAll("button")
+            .find((button) => button.text().includes("Copy GeoJSON"))!;
+        expect(copy.attributes("disabled")).toBeDefined();
+        wrapper.unmount();
+    });
+
+    it("applies point and line GeoJSON", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        await wrapper
+            .find("#abac-area-geojson")
+            .setValue('{"type": "Point", "coordinates": [0, 0]}');
+        await wrapper
+            .findAll("button")
+            .find((button) => button.text().includes("Apply GeoJSON"))!
+            .trigger("click");
+        expect(lastDefinition(wrapper).geometry).toEqual({
+            type: "GeometryCollection",
+            geometries: [{ type: "Point", coordinates: [0, 0] }],
+        });
+        wrapper.unmount();
+    });
+
     it("keeps the area and operator but drops the node when the model changes", async () => {
         const wrapper = mountForm({
             graphid: "g",
             nodeid: "n",
             geometry: square,
+            buffer: 10,
             operator: "within",
         });
         await flushPromises();
@@ -157,6 +256,7 @@ describe("SpatialRuleForm", () => {
         expect(lastDefinition(wrapper)).toEqual({
             graphid: "other",
             geometry: square,
+            buffer: 10,
             operator: "within",
         });
         wrapper.unmount();
