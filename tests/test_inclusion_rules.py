@@ -386,6 +386,17 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
                     )
                 self.assertEqual(set(filtered), {self.matching, self.also_matching})
 
+    def test_broken_rule_logs_error_once_per_kind_of_failure(self):
+        with mock.patch.object(LifecycleStateRule, "matches_resource") as matches:
+            with self.assertLogs(self.framework_logger, "WARNING") as logs:
+                for error in (ValueError, ValueError, KeyError, KeyError):
+                    matches.side_effect = error
+                    self.framework.get_perms(self.user, self.matching)
+        self.assertEqual(
+            [record.levelname for record in logs.records],
+            ["ERROR", "WARNING", "ERROR", "WARNING"],
+        )
+
     def test_get_perms_raises_database_error(self):
         with mock.patch.object(
             LifecycleStateRule, "matches_resource", side_effect=DatabaseError
