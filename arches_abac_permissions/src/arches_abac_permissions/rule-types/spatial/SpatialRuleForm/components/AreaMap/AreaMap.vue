@@ -109,6 +109,19 @@ const status = computed(() => {
         : $gettext("No area has been drawn.");
 });
 const isDrawing = computed(() => drawMode.value !== SIMPLE_SELECT);
+const overlayCount = computed(() => props.config.overlays.length);
+const shownOverlayCount = computed(
+    () =>
+        props.config.overlays.filter((entry) =>
+            Boolean(visibleOverlays.value[entry.name]),
+        ).length,
+);
+const overlaySummary = computed(() =>
+    $gettext("Overlays (%{shown} of %{total} shown)", {
+        shown: String(shownOverlayCount.value),
+        total: String(overlayCount.value),
+    }),
+);
 const showBasemapSelect = computed(() => props.config.basemaps.length > 1);
 
 watch(selectedBasemap, applyVisibility);
@@ -168,6 +181,12 @@ onBeforeUnmount(() => {
     draw = null;
     isLoaded = false;
 });
+
+function setAllOverlays(isVisible: boolean): void {
+    visibleOverlays.value = Object.fromEntries(
+        props.config.overlays.map((entry) => [entry.name, isVisible]),
+    );
+}
 
 // Only visibility changes; setStyle would drop the draw layers.
 function applyVisibility(): void {
@@ -338,26 +357,53 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
                     option-value="name"
                 />
             </div>
-            <fieldset
+            <details
                 v-if="config.overlays.length"
                 class="overlays"
             >
-                <legend>{{ $gettext("Overlays") }}</legend>
-                <div
-                    v-for="(overlay, index) in config.overlays"
-                    :key="overlay.name"
-                    class="overlay-option"
-                >
-                    <Checkbox
-                        v-model="visibleOverlays[overlay.name]"
-                        :input-id="`abac-overlay-${index}`"
-                        :binary="true"
+                <summary>
+                    <i
+                        class="pi pi-clone"
+                        aria-hidden="true"
                     />
-                    <label :for="`abac-overlay-${index}`">{{
-                        overlay.name
-                    }}</label>
-                </div>
-            </fieldset>
+                    <span>{{ overlaySummary }}</span>
+                </summary>
+                <fieldset class="overlays-body">
+                    <legend class="sr-only">{{ $gettext("Overlays") }}</legend>
+                    <div class="overlay-actions">
+                        <Button
+                            size="small"
+                            severity="secondary"
+                            :label="$gettext('Show all')"
+                            :disabled="shownOverlayCount === overlayCount"
+                            @click="setAllOverlays(true)"
+                        />
+                        <Button
+                            size="small"
+                            severity="secondary"
+                            :label="$gettext('Hide all')"
+                            :disabled="shownOverlayCount === 0"
+                            @click="setAllOverlays(false)"
+                        />
+                    </div>
+                    <div class="overlay-list">
+                        <div
+                            v-for="(overlay, index) in config.overlays"
+                            :key="overlay.name"
+                            class="overlay-option"
+                        >
+                            <Checkbox
+                                v-model="visibleOverlays[overlay.name]"
+                                :input-id="`abac-overlay-${index}`"
+                                :binary="true"
+                            />
+                            <label :for="`abac-overlay-${index}`">{{
+                                overlay.name
+                            }}</label>
+                        </div>
+                    </div>
+                </fieldset>
+            </details>
         </div>
         <div
             class="area-toolbar"
@@ -461,18 +507,49 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     min-inline-size: 20rem;
 }
 
-.overlays {
+.overlays summary {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    cursor: pointer;
+    border-radius: 0.4rem;
+}
+
+.overlays summary:focus-visible {
+    outline: 0.2rem solid var(--p-abac-accent);
+    outline-offset: 0.2rem;
+}
+
+.overlays-body {
     display: flex;
-    flex-wrap: wrap;
-    gap: 1.2rem;
+    flex-direction: column;
+    gap: 0.6rem;
     margin: 0;
+    margin-block-start: 0.6rem;
     padding: 0;
     border: 0;
 }
 
-.overlays legend {
-    padding: 0;
-    margin-block-end: 0.6rem;
+.overlay-actions {
+    display: flex;
+    gap: 0.6rem;
+}
+
+.overlay-list {
+    display: flex;
+    flex-direction: column;
+    gap: 0.6rem;
+    max-block-size: 16rem;
+    overflow-y: auto;
+}
+
+.sr-only {
+    position: absolute;
+    inline-size: 0.1rem;
+    block-size: 0.1rem;
+    overflow: hidden;
+    clip: rect(0, 0, 0, 0);
+    white-space: nowrap;
 }
 
 .overlay-option {
