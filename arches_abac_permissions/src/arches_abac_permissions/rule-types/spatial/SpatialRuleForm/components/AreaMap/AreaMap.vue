@@ -491,9 +491,9 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
 
 .map-layers {
     display: flex;
-    flex-wrap: wrap;
-    align-items: flex-end;
-    gap: 1.6rem;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 1.2rem;
 }
 
 .layer-field,
@@ -507,12 +507,22 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     min-inline-size: 20rem;
 }
 
+.overlays {
+    inline-size: 100%;
+    max-inline-size: 40rem;
+    border: 0.1rem solid var(--p-abac-border);
+    border-radius: 0.6rem;
+    background: var(--p-abac-surface-bg);
+}
+
 .overlays summary {
-    display: inline-flex;
+    display: flex;
     align-items: center;
-    gap: 0.5rem;
+    gap: 0.8rem;
+    padding: 0.8rem 1.2rem;
     cursor: pointer;
-    border-radius: 0.4rem;
+    border-radius: 0.6rem;
+    font-weight: 600;
 }
 
 .overlays summary:focus-visible {
@@ -520,13 +530,18 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     outline-offset: 0.2rem;
 }
 
+.overlays[open] summary {
+    border-end-start-radius: 0;
+    border-end-end-radius: 0;
+    border-block-end: 0.1rem solid var(--p-abac-border);
+}
+
 .overlays-body {
     display: flex;
     flex-direction: column;
-    gap: 0.6rem;
+    gap: 0.8rem;
     margin: 0;
-    margin-block-start: 0.6rem;
-    padding: 0;
+    padding: 1.2rem;
     border: 0;
 }
 
@@ -541,6 +556,7 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     gap: 0.6rem;
     max-block-size: 16rem;
     overflow-y: auto;
+    padding-inline-end: 0.6rem;
 }
 
 .sr-only {
