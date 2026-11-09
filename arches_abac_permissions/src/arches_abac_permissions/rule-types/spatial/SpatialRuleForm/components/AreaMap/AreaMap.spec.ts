@@ -1,193 +1,174 @@
-import { flushPromises, mount } from "@vue/test-utils";
+import { mount } from "@vue/test-utils";
 import { beforeEach, describe, expect, it, vi } from "vitest";
+import { nextTick, ref } from "vue";
 
 import AreaMap from "@/arches_abac_permissions/rule-types/spatial/SpatialRuleForm/components/AreaMap/AreaMap.vue";
 
-import type { MapConfig } from "@/arches_abac_permissions/rule-types/spatial/types";
+import type { Point, Polygon } from "geojson";
 
-const mapMock = vi.hoisted(() => ({
-    setLayoutProperty: vi.fn(),
-    handlers: {} as Record<string, () => void>,
+vi.mock("vue3-gettext", () => ({
+    useGettext: () => ({
+        $gettext: (text: string, values: Record<string, string> = {}) =>
+            text.replace(/%\{(\w+)\}/g, (_, key) => values[key]),
+        $ngettext: (
+            one: string,
+            many: string,
+            count: number,
+            values: Record<string, string> = {},
+        ) =>
+            (count === 1 ? one : many).replace(
+                /%\{(\w+)\}/g,
+                (_, key) => values[key],
+            ),
+    }),
 }));
 
-vi.mock("vue3-gettext", () => {
-    const format = (text: string, values: Record<string, string> = {}) =>
-        text.replace(/%\{(\w+)\}/g, (_match, key) => values[key]);
-    return {
-        useGettext: () => ({
-            $gettext: format,
-            $ngettext: (
-                one: string,
-                many: string,
-                count: number,
-                values?: Record<string, string>,
-            ) => format(count === 1 ? one : many, values),
-        }),
-    };
-});
+const context = vi.hoisted(() => ({
+    map: { value: {} },
+    drawnFeatures: { value: [] as unknown[] },
+    setBufferForFeature: vi.fn(),
+    deleteAllDrawnFeatures: vi.fn(),
+    addFeatures: vi.fn(),
+}));
 
-vi.mock("maplibre-gl", () => ({
-    Map: class {
-        on(event: string, handler: () => void) {
-            mapMock.handlers[event] = handler;
-        }
-        getCanvas() {
-            return { setAttribute: vi.fn() };
-        }
-        addControl() {}
-        addSource() {}
-        addLayer() {}
-        getLayer() {
+vi.mock("@/arches_vue_components/components", () => ({
+    MapComponent: {
+        name: "MapComponent",
+        props: ["value"],
+        emits: ["update:value"],
+        setup(_: unknown, { expose }: { expose: (api: unknown) => void }) {
+            expose({ context });
             return {};
-        }
-        getSource() {
-            return undefined;
-        }
-        setLayoutProperty(...args: unknown[]) {
-            mapMock.setLayoutProperty(...args);
-        }
-        remove() {}
-    },
-    NavigationControl: class {},
-    setWorkerUrl() {},
-}));
-
-vi.mock("@mapbox/mapbox-gl-draw", () => ({
-    default: class {
-        getAll() {
-            return { type: "FeatureCollection", features: [] };
-        }
-        set() {}
-        deleteAll() {}
-        changeMode() {}
+        },
+        template: "<div class='map-stub' />",
     },
 }));
 
-const OVERLAY_NAMES = ["Parcels", "Roads & Paths", "Rivers"];
+const square: Polygon = {
+    type: "Polygon",
+    coordinates: [
+        [
+            [0, 0],
+            [1, 0],
+            [1, 1],
+            [0, 0],
+        ],
+    ],
+};
+const point: Point = { type: "Point", coordinates: [2, 3] };
 
-function layer(name: string) {
-    const id = name.toLowerCase();
+function feature(geometry: unknown, bufferDistance = 0) {
     return {
-        name,
-        layers: [{ id, type: "fill", source: id }],
-        sources: { [id]: { type: "geojson", data: {} } },
+        type: "Feature",
+        geometry,
+        properties: { buffer_distance: bufferDistance },
     };
 }
 
-const config: MapConfig = {
-    basemaps: [layer("streets")],
-    overlays: OVERLAY_NAMES.map(layer),
-    default_basemap: "streets",
-    bounds: null,
-    min_zoom: 0,
-    max_zoom: 20,
-    sprite: null,
-    glyphs: null,
-} as unknown as MapConfig;
-
-const stubs = {
-    Button: {
-        props: ["label", "disabled"],
-        template:
-            "<button type='button' :disabled='disabled'>{{ label }}</button>",
-    },
-    Checkbox: {
-        props: ["modelValue", "inputId"],
-        emits: ["update:modelValue"],
-        template:
-            "<input type='checkbox' :id='inputId' :checked='modelValue' @change=\"$emit('update:modelValue', $event.target.checked)\" />",
-    },
-    Select: true,
-};
-
-function mountMap(overlayConfig: MapConfig = config) {
-    return mount(AreaMap, {
-        props: { config: overlayConfig, modelValue: undefined },
-        global: { stubs },
+function mountMap(props: Record<string, unknown> = {}) {
+    const area = ref<unknown>(props.modelValue);
+    const wrapper = mount(AreaMap, {
+        props: {
+            modelValue: area.value,
+            "onUpdate:modelValue": (value: unknown) => {
+                area.value = value;
+                void wrapper.setProps({ modelValue: value });
+            },
+            ...props,
+        } as never,
     });
+    return { wrapper, area };
 }
 
-function button(wrapper: ReturnType<typeof mountMap>, label: string) {
-    return wrapper.findAll("button").find((entry) => entry.text() === label)!;
-}
-
-describe("AreaMap overlays", () => {
+describe("AreaMap", () => {
     beforeEach(() => {
-        mapMock.setLayoutProperty.mockClear();
+        vi.clearAllMocks();
+        context.drawnFeatures.value = [];
     });
 
-    it("renders a collapsed disclosure with a hidden legend", () => {
-        const wrapper = mountMap();
-        const details = wrapper.find("details.overlays");
-        expect(details.exists()).toBe(true);
-        expect(details.attributes("open")).toBeUndefined();
-        expect(details.find("summary").text()).toBe("Overlays (0 of 3 shown)");
-        expect(details.find("fieldset legend").text()).toBe("Overlays");
-    });
-
-    it("lists every overlay with index-based ids", () => {
-        const wrapper = mountMap();
-        const labels = wrapper.findAll(".overlay-list label");
-        expect(labels.map((entry) => entry.text())).toEqual(OVERLAY_NAMES);
-        expect(labels.map((entry) => entry.attributes("for"))).toEqual([
-            "abac-overlay-0",
-            "abac-overlay-1",
-            "abac-overlay-2",
-        ]);
-        expect(wrapper.find("#abac-overlay-1").exists()).toBe(true);
-    });
-
-    it("updates the summary count when toggling", async () => {
-        const wrapper = mountMap();
-        await wrapper.find("#abac-overlay-0").setValue(true);
-        expect(wrapper.find("summary").text()).toBe("Overlays (1 of 3 shown)");
-        await wrapper.find("#abac-overlay-0").setValue(false);
-        expect(wrapper.find("summary").text()).toBe("Overlays (0 of 3 shown)");
-    });
-
-    it("shows and hides all overlays and sets layer visibility", async () => {
-        const wrapper = mountMap();
-        mapMock.handlers.load();
-        mapMock.setLayoutProperty.mockClear();
-        expect(
-            button(wrapper, "Hide all").attributes("disabled"),
-        ).toBeDefined();
-        expect(
-            button(wrapper, "Show all").attributes("disabled"),
-        ).toBeUndefined();
-
-        await button(wrapper, "Show all").trigger("click");
-        await flushPromises();
-        expect(wrapper.find("summary").text()).toBe("Overlays (3 of 3 shown)");
-        for (const name of OVERLAY_NAMES) {
-            expect(mapMock.setLayoutProperty).toHaveBeenCalledWith(
-                name.toLowerCase(),
-                "visibility",
-                "visible",
-            );
-        }
-        expect(
-            button(wrapper, "Show all").attributes("disabled"),
-        ).toBeDefined();
-        expect(
-            button(wrapper, "Hide all").attributes("disabled"),
-        ).toBeUndefined();
-
-        await button(wrapper, "Hide all").trigger("click");
-        await flushPromises();
-        expect(wrapper.find("summary").text()).toBe("Overlays (0 of 3 shown)");
-        expect(mapMock.setLayoutProperty).toHaveBeenCalledWith(
-            "parcels",
-            "visibility",
-            "none",
+    it("passes the initial area to the map as a feature collection", () => {
+        const { wrapper } = mountMap({ modelValue: square, buffer: 5 });
+        const value = wrapper
+            .findComponent({ name: "MapComponent" })
+            .props("value") as {
+            features: { geometry: unknown; properties: unknown }[];
+        };
+        expect(value.features).toHaveLength(1);
+        expect(value.features[0].geometry).toEqual(square);
+        expect(value.features[0].properties).toMatchObject({
+            buffer_distance: 5,
+            buffer_units: "meters",
+        });
+        expect(wrapper.find("[role=status]").text()).toBe(
+            "The area has 1 polygon.",
         );
-        expect(
-            button(wrapper, "Hide all").attributes("disabled"),
-        ).toBeDefined();
     });
 
-    it("omits the disclosure when there are no overlays", () => {
-        const wrapper = mountMap({ ...config, overlays: [] });
-        expect(wrapper.find("details.overlays").exists()).toBe(false);
+    it("reports drawn features as an area", async () => {
+        const { wrapper, area } = mountMap();
+        expect(wrapper.find("[role=status]").text()).toBe(
+            "No area has been drawn.",
+        );
+        await wrapper
+            .findComponent({ name: "MapComponent" })
+            .vm.$emit("update:value", {
+                type: "FeatureCollection",
+                features: [feature(square), feature(point)],
+            });
+        await nextTick();
+        expect(area.value).toEqual({
+            type: "GeometryCollection",
+            geometries: [square, point],
+        });
+        expect(wrapper.find("[role=status]").text()).toBe(
+            "The area has 1 polygon, 1 point.",
+        );
+    });
+
+    it("applies the buffer to drawn features that differ", async () => {
+        const stale = feature(point, 0);
+        const current = feature(square, 20);
+        context.drawnFeatures.value = [stale, current];
+        const { wrapper } = mountMap({ modelValue: point, buffer: 20 });
+        await wrapper.setProps({ buffer: 50 });
+        expect(context.setBufferForFeature).toHaveBeenCalledWith(
+            stale,
+            50,
+            "meters",
+        );
+        expect(context.setBufferForFeature).toHaveBeenCalledWith(
+            current,
+            50,
+            "meters",
+        );
+    });
+
+    it("pushes external area changes onto the map", async () => {
+        const { wrapper } = mountMap({ modelValue: square });
+        await wrapper.setProps({ modelValue: point });
+        expect(context.deleteAllDrawnFeatures).toHaveBeenCalled();
+        expect(context.addFeatures).toHaveBeenCalledTimes(1);
+        const added = context.addFeatures.mock.calls[0][0];
+        expect(added[0].geometry).toEqual(point);
+    });
+
+    it("doesn't echo the map's own changes back to it", async () => {
+        const { wrapper } = mountMap();
+        await wrapper
+            .findComponent({ name: "MapComponent" })
+            .vm.$emit("update:value", {
+                type: "FeatureCollection",
+                features: [feature(square)],
+            });
+        await nextTick();
+        expect(context.deleteAllDrawnFeatures).not.toHaveBeenCalled();
+    });
+
+    it("links the map to its help text", () => {
+        const { wrapper } = mountMap({ describedBy: "help" });
+        expect(wrapper.find(".map-frame").attributes()).toMatchObject({
+            role: "group",
+            "aria-describedby": "help",
+        });
     });
 });

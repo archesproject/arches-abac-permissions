@@ -4,8 +4,6 @@ import { useGettext } from "vue3-gettext";
 
 import Button from "openvue/button";
 import InputNumber from "openvue/inputnumber";
-import Message from "openvue/message";
-import ProgressSpinner from "openvue/progressspinner";
 import Select from "openvue/select";
 import Textarea from "openvue/textarea";
 import { useToast } from "openvue/usetoast";
@@ -18,7 +16,6 @@ import {
 } from "@/arches_abac_permissions/constants.ts";
 import {
     fetchGeometryNodes,
-    fetchMapConfig,
     fetchResourceModels,
 } from "@/arches_abac_permissions/rule-types/spatial/api.ts";
 import {
@@ -31,7 +28,6 @@ import AreaMap from "@/arches_abac_permissions/rule-types/spatial/SpatialRuleFor
 import type {
     AreaGeometry,
     GeometryNode,
-    MapConfig,
     ResourceModel,
     SpatialDefinition,
     SpatialOperator,
@@ -52,8 +48,6 @@ const toast = useToast();
 
 const resourceModels = ref<ResourceModel[]>([]);
 const nodes = ref<GeometryNode[]>([]);
-const mapConfig = ref<MapConfig | null>(null);
-const mapError = ref("");
 const isLoadingModels = ref(true);
 const isLoadingNodes = ref(false);
 const geoJsonText = ref("");
@@ -114,7 +108,6 @@ const requiresBuffer = computed(() => needsBuffer(area.value));
 
 watchEffect(loadResourceModels);
 watchEffect(loadNodes);
-watchEffect(loadMapConfig);
 
 function showError(summary: string, error: unknown): void {
     toast.add({
@@ -156,17 +149,6 @@ async function loadNodes(): Promise<void> {
         if (request === nodesRequest) {
             isLoadingNodes.value = false;
         }
-    }
-}
-
-async function loadMapConfig(): Promise<void> {
-    try {
-        mapConfig.value = await fetchMapConfig();
-    } catch (error) {
-        mapError.value =
-            error instanceof Error
-                ? error.message
-                : $gettext("Unable to load the map");
     }
 }
 
@@ -322,23 +304,9 @@ function applyGeoJson(): void {
             </p>
         </div>
         <AreaMap
-            v-if="mapConfig"
             v-model="area"
-            :config="mapConfig"
             :buffer="definition.buffer"
             :described-by="AREA_HELP_ID"
-        />
-        <Message
-            v-else-if="mapError"
-            severity="error"
-            role="alert"
-        >
-            {{ mapError }}
-        </Message>
-        <ProgressSpinner
-            v-else
-            class="map-spinner"
-            :aria-label="$gettext('Loading map')"
         />
         <details
             class="geojson"
@@ -422,11 +390,6 @@ function applyGeoJson(): void {
     display: flex;
     flex-wrap: wrap;
     gap: 0.6rem;
-}
-
-.map-spinner {
-    inline-size: 3.2rem;
-    block-size: 3.2rem;
 }
 
 .geojson {

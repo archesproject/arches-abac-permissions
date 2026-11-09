@@ -1,10 +1,4 @@
-import type {
-    Feature,
-    FeatureCollection,
-    Geometry,
-    Polygon,
-    Position,
-} from "geojson";
+import type { Feature, FeatureCollection, Geometry, Polygon } from "geojson";
 
 import type { AreaGeometry } from "@/arches_abac_permissions/rule-types/spatial/types";
 
@@ -76,21 +70,6 @@ export function toFeatureCollection(
 // Points and lines have no area until buffered.
 export function needsBuffer(area: AreaGeometry | undefined): boolean {
     return partsOf(area).some((part) => !POLYGONAL_TYPES.includes(part.type));
-}
-
-export function positionsOf(area: AreaGeometry | undefined): Position[] {
-    return partsOf(area).flatMap((part): Position[] => {
-        if (part.type === "Point") {
-            return [part.coordinates];
-        }
-        if (part.type === "LineString") {
-            return part.coordinates;
-        }
-        if (part.type === "Polygon") {
-            return part.coordinates.flat();
-        }
-        return [];
-    });
 }
 
 // Accepts a geometry, Feature, FeatureCollection or GeometryCollection of

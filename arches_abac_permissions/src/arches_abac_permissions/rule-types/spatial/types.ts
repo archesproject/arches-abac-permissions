@@ -40,21 +40,3 @@ export interface GeometryNode {
     name: string;
     alias: string;
 }
-
-export interface MapLayerConfig {
-    name: string;
-    layers: Record<string, unknown>[];
-    sources: Record<string, Record<string, unknown>>;
-}
-
-export interface MapConfig {
-    basemaps: MapLayerConfig[];
-    overlays: MapLayerConfig[];
-    default_basemap: string | null;
-    // [west, south, east, north]
-    bounds: [number, number, number, number] | null;
-    min_zoom: number;
-    max_zoom: number;
-    sprite: string;
-    glyphs: string;
-}

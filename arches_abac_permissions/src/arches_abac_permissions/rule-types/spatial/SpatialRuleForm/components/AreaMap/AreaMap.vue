@@ -1,67 +1,26 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref, useTemplateRef, watch } from "vue";
 import { useGettext } from "vue3-gettext";
 
-import MapboxDraw from "@mapbox/mapbox-gl-draw";
-import {
-    Map as MapLibreMap,
-    NavigationControl,
-    setWorkerUrl,
-} from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
-import bufferGeometry from "@turf/buffer";
-
-import Button from "openvue/button";
-import Checkbox from "openvue/checkbox";
-import Select from "openvue/select";
+import { MapComponent } from "@/arches_vue_components/components";
 
 import {
     areaOf,
     partsOf,
-    positionsOf,
     toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
-import {
-    buildStyle,
-    layerIdsOf,
-} from "@/arches_abac_permissions/rule-types/spatial/map-style.ts";
 
-import type { Feature, FeatureCollection } from "geojson";
-import type { GeoJSONSource, IControl, LngLatBoundsLike } from "maplibre-gl";
-import type {
-    AreaGeometry,
-    MapConfig,
-} from "@/arches_abac_permissions/rule-types/spatial/types";
+import type { FeatureCollection } from "geojson";
+import type { AreaGeometry } from "@/arches_abac_permissions/rule-types/spatial/types";
 
-// The subset of mapbox-gl-draw used here; the package ships no types.
-interface DrawControl extends IControl {
-    set(collection: FeatureCollection): void;
-    getAll(): FeatureCollection;
-    changeMode(mode: string): void;
-    trash(): void;
-    deleteAll(): void;
-}
-
-// Serve the worker as a webpack-emitted asset, as arches core does.
-setWorkerUrl(
-    new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href,
-);
-new URL("maplibre-gl/dist/maplibre-gl-shared.mjs?asset", import.meta.url);
-
-const DRAW_POLYGON = "draw_polygon";
-const DRAW_POINT = "draw_point";
-const DRAW_LINE = "draw_line_string";
-const SIMPLE_SELECT = "simple_select";
-const BUFFER_SOURCE = "abac-buffer-preview";
-const BUFFER_FILL_LAYER = "abac-buffer-preview-fill";
-const BUFFER_LINE_LAYER = "abac-buffer-preview-line";
-const BUFFER_COLOR = "#e07b00";
-const BUFFER_FILL_OPACITY = 0.25;
-const BUFFER_LINE_WIDTH = 2;
-const BASEMAP_SELECT_ID = "abac-basemap";
+const METERS = "meters";
+const STATUS_TYPES = [
+    { types: ["Polygon"], one: "%{count} polygon", many: "%{count} polygons" },
+    { types: ["Point"], one: "%{count} point", many: "%{count} points" },
+    { types: ["LineString"], one: "%{count} line", many: "%{count} lines" },
+];
 
 const props = defineProps<{
-    config: MapConfig;
     buffer?: number;
     describedBy?: string;
 }>();
@@ -69,407 +28,95 @@ const area = defineModel<AreaGeometry | undefined>({ required: true });
 
 const { $gettext, $ngettext } = useGettext();
 
-const container = ref<HTMLElement>();
-const drawMode = ref(SIMPLE_SELECT);
-const hasSelection = ref(false);
-const selectedBasemap = ref<string | null>(
-    props.config.default_basemap ?? props.config.basemaps[0]?.name ?? null,
-);
-const visibleOverlays = ref<Record<string, boolean>>({});
+const mapRef = useTemplateRef<InstanceType<typeof MapComponent>>("map");
+const bufferDistance = computed(() => props.buffer ?? 0);
 
-let map: MapLibreMap | null = null;
-let draw: DrawControl | null = null;
-// The area last read from the map, to tell our own updates from outside ones.
-let syncedArea = "";
-let isLoaded = false;
+// Only the initial value is read by the map; later changes go through
+// syncMap and update:value.
+const initialValue = withBuffer(toFeatureCollection(area.value));
 
 const parts = computed(() => partsOf(area.value));
-const partCount = computed(() => parts.value.length);
 const status = computed(() => {
-    const counts = [
-        {
-            types: ["Polygon"],
-            one: "%{count} polygon",
-            many: "%{count} polygons",
-        },
-        { types: ["Point"], one: "%{count} point", many: "%{count} points" },
-        { types: ["LineString"], one: "%{count} line", many: "%{count} lines" },
-    ]
-        .map(({ types, one, many }) => {
-            const count = parts.value.filter((part) =>
-                types.includes(part.type),
-            ).length;
-            return count
-                ? $ngettext(one, many, count, { count: String(count) })
-                : "";
-        })
-        .filter(Boolean);
+    const counts = STATUS_TYPES.map(({ types, one, many }) => {
+        const count = parts.value.filter((part) =>
+            types.includes(part.type),
+        ).length;
+        return count
+            ? $ngettext(one, many, count, { count: String(count) })
+            : "";
+    }).filter(Boolean);
     return counts.length
         ? $gettext("The area has %{counts}.", { counts: counts.join(", ") })
         : $gettext("No area has been drawn.");
 });
-const isDrawing = computed(() => drawMode.value !== SIMPLE_SELECT);
-const overlayCount = computed(() => props.config.overlays.length);
-const shownOverlayCount = computed(
-    () =>
-        props.config.overlays.filter((entry) =>
-            Boolean(visibleOverlays.value[entry.name]),
-        ).length,
-);
-const overlaySummary = computed(() =>
-    $gettext("Overlays (%{shown} of %{total} shown)", {
-        shown: String(shownOverlayCount.value),
-        total: String(overlayCount.value),
-    }),
-);
-const showBasemapSelect = computed(() => props.config.basemaps.length > 1);
 
-watch(selectedBasemap, applyVisibility);
-watch(visibleOverlays, applyVisibility, { deep: true });
-watch(
-    () => props.buffer,
-    () => showBuffer(area.value),
-);
+const syncedArea = ref(areaKey(area.value));
 
-watch(area, (geometry) => {
-    if (JSON.stringify(geometry ?? null) !== syncedArea) {
-        showArea(geometry, true);
+watch(bufferDistance, applyBuffer);
+watch(area, syncMap);
+
+function areaKey(geometry: AreaGeometry | undefined): string {
+    return JSON.stringify(areaOf(partsOf(geometry)) ?? null);
+}
+
+function withBuffer(collection: FeatureCollection): FeatureCollection {
+    for (const feature of collection.features) {
+        feature.properties = {
+            ...feature.properties,
+            buffer_distance: bufferDistance.value,
+            buffer_units: METERS,
+        };
     }
-});
+    return collection;
+}
 
-onMounted(() => {
-    const bounds = boundsOf(area.value) ?? props.config.bounds ?? undefined;
-    map = new MapLibreMap({
-        container: container.value!,
-        style: buildStyle(props.config),
-        bounds,
-        fitBoundsOptions: { padding: 40, maxZoom: 16 },
-        minZoom: props.config.min_zoom,
-        maxZoom: props.config.max_zoom,
-        attributionControl: { compact: true },
-    });
-    map.getCanvas().setAttribute("aria-label", $gettext("Area map"));
-    if (props.describedBy) {
-        map.getCanvas().setAttribute("aria-describedby", props.describedBy);
+// Preview only; the backend buffers the saved geometry.
+function applyBuffer(): void {
+    const context = mapRef.value?.context;
+    for (const feature of context?.drawnFeatures.value ?? []) {
+        if (feature.properties?.buffer_distance !== bufferDistance.value) {
+            context!.setBufferForFeature(feature, bufferDistance.value, METERS);
+        }
     }
-    map.addControl(new NavigationControl({ showCompass: false }));
-    draw = new MapboxDraw({
-        displayControlsDefault: false,
-        defaultMode: SIMPLE_SELECT,
-    }) as DrawControl;
-    map.addControl(draw);
-    map.on("load", () => {
-        isLoaded = true;
-        addBufferLayers();
-        applyVisibility();
-        showArea(area.value, false);
-    });
-    onDraw("draw.create", readArea);
-    onDraw("draw.update", readArea);
-    onDraw("draw.delete", readArea);
-    onDraw<{ mode: string }>("draw.modechange", (event) => {
-        drawMode.value = event.mode;
-    });
-    onDraw<{ features: Feature[] }>("draw.selectionchange", (event) => {
-        hasSelection.value = event.features.length > 0;
-    });
-});
+}
 
-onBeforeUnmount(() => {
-    map?.remove();
-    map = null;
-    draw = null;
-    isLoaded = false;
-});
-
-function setAllOverlays(isVisible: boolean): void {
-    visibleOverlays.value = Object.fromEntries(
-        props.config.overlays.map((entry) => [entry.name, isVisible]),
+function onValueUpdate(collection: FeatureCollection): void {
+    const next = areaOf(
+        collection.features.flatMap((feature) => partsOf(feature.geometry)),
     );
+    const key = areaKey(next);
+    if (key !== syncedArea.value) {
+        syncedArea.value = key;
+        area.value = next;
+    }
+    applyBuffer();
 }
 
-// Only visibility changes; setStyle would drop the draw layers.
-function applyVisibility(): void {
-    if (!map || !isLoaded) {
+// Pushes a change made outside the map (e.g. pasted GeoJSON) onto it.
+function syncMap(geometry: AreaGeometry | undefined): void {
+    const key = areaKey(geometry);
+    const context = mapRef.value?.context;
+    if (key === syncedArea.value || !context?.map.value) {
         return;
     }
-    const entries = [
-        ...props.config.basemaps.map((entry) => ({
-            name: entry.name,
-            isVisible: entry.name === selectedBasemap.value,
-        })),
-        ...props.config.overlays.map((entry) => ({
-            name: entry.name,
-            isVisible: Boolean(visibleOverlays.value[entry.name]),
-        })),
-    ];
-    for (const { name, isVisible } of entries) {
-        for (const id of layerIdsOf(props.config, name)) {
-            if (map.getLayer(id)) {
-                map.setLayoutProperty(
-                    id,
-                    "visibility",
-                    isVisible ? "visible" : "none",
-                );
-            }
-        }
-    }
-}
-
-function addBufferLayers(): void {
-    if (!map) {
-        return;
-    }
-    map.addSource(BUFFER_SOURCE, {
-        type: "geojson",
-        data: { type: "FeatureCollection", features: [] },
-    });
-    map.addLayer({
-        id: BUFFER_FILL_LAYER,
-        type: "fill",
-        source: BUFFER_SOURCE,
-        paint: {
-            "fill-color": BUFFER_COLOR,
-            "fill-opacity": BUFFER_FILL_OPACITY,
-        },
-    });
-    map.addLayer({
-        id: BUFFER_LINE_LAYER,
-        type: "line",
-        source: BUFFER_SOURCE,
-        paint: { "line-color": BUFFER_COLOR, "line-width": BUFFER_LINE_WIDTH },
-    });
-    showBuffer(area.value);
-}
-
-// A preview only; the backend computes the authoritative buffer.
-function showBuffer(geometry: AreaGeometry | undefined): void {
-    const source = map?.getSource(BUFFER_SOURCE) as GeoJSONSource | undefined;
-    if (!source) {
-        return;
-    }
-    let preview: FeatureCollection = {
-        type: "FeatureCollection",
-        features: [],
-    };
-    if (props.buffer && props.buffer > 0 && geometry) {
-        try {
-            const buffered = bufferGeometry(
-                toFeatureCollection(geometry),
-                props.buffer,
-                {
-                    units: "meters",
-                },
-            );
-            preview = buffered ?? preview;
-        } catch {
-            preview = { type: "FeatureCollection", features: [] };
-        }
-    }
-    source.setData(preview);
-}
-
-function boundsOf(geometry: AreaGeometry | undefined): LngLatBoundsLike | null {
-    const positions = positionsOf(geometry);
-    if (!positions.length) {
-        return null;
-    }
-    const xs = positions.map((position) => position[0]);
-    const ys = positions.map((position) => position[1]);
-    return [
-        [Math.min(...xs), Math.min(...ys)],
-        [Math.max(...xs), Math.max(...ys)],
-    ];
-}
-
-function showArea(geometry: AreaGeometry | undefined, fit: boolean): void {
-    syncedArea = JSON.stringify(geometry ?? null);
-    if (!draw || !isLoaded) {
-        return;
-    }
-    draw.set(toFeatureCollection(geometry));
-    showBuffer(geometry);
-    hasSelection.value = false;
-    const bounds = boundsOf(geometry);
-    if (fit && bounds && map) {
-        map.fitBounds(bounds, { padding: 40, maxZoom: 16, duration: 0 });
-    }
-}
-
-function readArea(): void {
-    if (!draw) {
-        return;
-    }
-    const geometries = draw
-        .getAll()
-        .features.map((feature) => feature.geometry);
-    const next = areaOf(geometries);
-    syncedArea = JSON.stringify(next ?? null);
-    area.value = next;
-    showBuffer(next);
-}
-
-function toggleDrawing(mode: string): void {
-    const next = drawMode.value === mode ? SIMPLE_SELECT : mode;
-    draw?.changeMode(next);
-    drawMode.value = next;
-}
-
-function deleteSelected(): void {
-    draw?.trash();
-    readArea();
-}
-
-function clearArea(): void {
-    draw?.deleteAll();
-    drawMode.value = SIMPLE_SELECT;
-    readArea();
-}
-
-// Draw events aren't part of maplibre's typed event map.
-function onDraw<T>(type: string, listener: (event: T) => void): void {
-    (
-        map as unknown as {
-            on: (type: string, listener: (event: T) => void) => void;
-        }
-    ).on(type, listener);
+    syncedArea.value = key;
+    context.deleteAllDrawnFeatures();
+    context.addFeatures(withBuffer(toFeatureCollection(geometry)).features);
 }
 </script>
 
 <template>
     <div class="area-map">
         <div
-            v-if="showBasemapSelect || config.overlays.length"
-            class="map-layers"
-        >
-            <div
-                v-if="showBasemapSelect"
-                class="layer-field"
-            >
-                <label :for="BASEMAP_SELECT_ID">{{
-                    $gettext("Basemap")
-                }}</label>
-                <Select
-                    v-model="selectedBasemap"
-                    :input-id="BASEMAP_SELECT_ID"
-                    :options="config.basemaps"
-                    option-label="name"
-                    option-value="name"
-                />
-            </div>
-            <details
-                v-if="config.overlays.length"
-                class="overlays"
-            >
-                <summary>
-                    <i
-                        class="pi pi-clone"
-                        aria-hidden="true"
-                    />
-                    <span>{{ overlaySummary }}</span>
-                </summary>
-                <fieldset class="overlays-body">
-                    <legend class="sr-only">{{ $gettext("Overlays") }}</legend>
-                    <div class="overlay-actions">
-                        <Button
-                            size="small"
-                            severity="secondary"
-                            :label="$gettext('Show all')"
-                            :disabled="shownOverlayCount === overlayCount"
-                            @click="setAllOverlays(true)"
-                        />
-                        <Button
-                            size="small"
-                            severity="secondary"
-                            :label="$gettext('Hide all')"
-                            :disabled="shownOverlayCount === 0"
-                            @click="setAllOverlays(false)"
-                        />
-                    </div>
-                    <div class="overlay-list">
-                        <div
-                            v-for="(overlay, index) in config.overlays"
-                            :key="overlay.name"
-                            class="overlay-option"
-                        >
-                            <Checkbox
-                                v-model="visibleOverlays[overlay.name]"
-                                :input-id="`abac-overlay-${index}`"
-                                :binary="true"
-                            />
-                            <label :for="`abac-overlay-${index}`">{{
-                                overlay.name
-                            }}</label>
-                        </div>
-                    </div>
-                </fieldset>
-            </details>
-        </div>
-        <div
-            class="area-toolbar"
-            role="toolbar"
-            :aria-label="$gettext('Area tools')"
-        >
-            <Button
-                size="small"
-                icon="pi pi-pencil"
-                :label="
-                    drawMode === DRAW_POLYGON
-                        ? $gettext('Stop Drawing')
-                        : $gettext('Draw Polygon')
-                "
-                :aria-pressed="drawMode === DRAW_POLYGON"
-                @click="toggleDrawing(DRAW_POLYGON)"
-            />
-            <Button
-                size="small"
-                icon="pi pi-map-marker"
-                :label="
-                    drawMode === DRAW_POINT
-                        ? $gettext('Stop Drawing')
-                        : $gettext('Draw Point')
-                "
-                :aria-pressed="drawMode === DRAW_POINT"
-                @click="toggleDrawing(DRAW_POINT)"
-            />
-            <Button
-                size="small"
-                icon="pi pi-minus"
-                :label="
-                    drawMode === DRAW_LINE
-                        ? $gettext('Stop Drawing')
-                        : $gettext('Draw Line')
-                "
-                :aria-pressed="drawMode === DRAW_LINE"
-                @click="toggleDrawing(DRAW_LINE)"
-            />
-            <Button
-                size="small"
-                severity="secondary"
-                variant="outlined"
-                icon="pi pi-trash"
-                :label="$gettext('Delete Selected')"
-                :disabled="!hasSelection"
-                @click="deleteSelected"
-            />
-            <Button
-                size="small"
-                severity="secondary"
-                variant="outlined"
-                icon="pi pi-times"
-                :label="$gettext('Clear Area')"
-                :disabled="!partCount"
-                @click="clearArea"
-            />
-        </div>
-        <!-- Vue must not bind classes on maplibre's container; it'd drop maplibre's own. -->
-        <div
             class="map-frame"
-            :class="{ drawing: isDrawing }"
+            role="group"
+            :aria-label="$gettext('Area map')"
+            :aria-describedby="describedBy"
         >
-            <div
-                ref="container"
-                class="map-container"
+            <MapComponent
+                ref="map"
+                :value="initialValue"
+                @update:value="onValueUpdate"
             />
         </div>
         <p
@@ -489,116 +136,12 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     max-inline-size: 90rem;
 }
 
-.map-layers {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 1.2rem;
-}
-
-.layer-field,
-.overlay-option {
-    display: flex;
-    gap: 0.6rem;
-}
-
-.layer-field {
-    flex-direction: column;
-    min-inline-size: 20rem;
-}
-
-.overlays {
-    inline-size: 100%;
-    max-inline-size: 40rem;
-    border: 0.1rem solid var(--p-abac-border);
-    border-radius: 0.6rem;
-    background: var(--p-abac-surface-bg);
-}
-
-.overlays summary {
-    display: flex;
-    align-items: center;
-    gap: 0.8rem;
-    padding: 0.8rem 1.2rem;
-    cursor: pointer;
-    border-radius: 0.6rem;
-    font-weight: 600;
-}
-
-.overlays summary:focus-visible {
-    outline: 0.2rem solid var(--p-abac-accent);
-    outline-offset: 0.2rem;
-}
-
-.overlays[open] summary {
-    border-end-start-radius: 0;
-    border-end-end-radius: 0;
-    border-block-end: 0.1rem solid var(--p-abac-border);
-}
-
-.overlays-body {
-    display: flex;
-    flex-direction: column;
-    gap: 0.8rem;
-    margin: 0;
-    padding: 1.2rem;
-    border: 0;
-}
-
-.overlay-actions {
-    display: flex;
-    gap: 0.6rem;
-}
-
-.overlay-list {
-    display: flex;
-    flex-direction: column;
-    gap: 0.6rem;
-    max-block-size: 16rem;
-    overflow-y: auto;
-    padding-inline-end: 0.6rem;
-}
-
-.sr-only {
-    position: absolute;
-    inline-size: 0.1rem;
-    block-size: 0.1rem;
-    overflow: hidden;
-    clip: rect(0, 0, 0, 0);
-    white-space: nowrap;
-}
-
-.overlay-option {
-    align-items: center;
-}
-
-.area-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem;
-}
-
 .map-frame {
-    block-size: 36rem;
+    block-size: 48rem;
     background: var(--p-abac-surface-bg);
     border: 0.1rem solid var(--p-abac-border);
     border-radius: 0.6rem;
     overflow: hidden;
-}
-
-.map-container {
-    position: relative;
-    block-size: 100%;
-}
-
-.map-frame:focus-within {
-    outline: 0.2rem solid var(--p-abac-accent);
-    outline-offset: 0.2rem;
-}
-
-.map-frame.drawing :deep(.maplibregl-canvas-container) {
-    cursor: crosshair;
 }
 
 .area-status {

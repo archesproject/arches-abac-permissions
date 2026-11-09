@@ -5,7 +5,6 @@ import {
     parseArea,
     needsBuffer,
     partsOf,
-    positionsOf,
     toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
 
@@ -110,13 +109,6 @@ describe("geometry helpers", () => {
         expect(needsBuffer(square)).toBe(false);
         expect(needsBuffer(point)).toBe(true);
         expect(needsBuffer(areaOf([square, line]))).toBe(true);
-    });
-
-    it("lists the positions of an area", () => {
-        expect(positionsOf(undefined)).toEqual([]);
-        expect(positionsOf(point)).toEqual([[2, 3]]);
-        expect(positionsOf(line)).toEqual(line.coordinates);
-        expect(positionsOf(square)).toEqual(square.coordinates[0]);
     });
 
     it("parses geometries, features and feature collections", () => {

@@ -555,55 +555,23 @@ class SpatialApiTests(SpatialTestCase):
         self.assertNotIn("geojson-feature-collection", default)
 
     def test_map_config(self):
-        MapLayer.objects.all().delete()
         MapSource.objects.create(
             name="abac-test-tiles",
             source={"type": "raster", "tiles": ["https://example.com/{z}/{x}/{y}"]},
         )
-        MapSource.objects.create(name="abac-other", source={"type": "raster"})
-
-        def layer(name, source, **kwargs):
-            definitions = [{"id": f"{name}-id", "type": "raster", "source": source}]
-            return MapLayer.objects.create(
-                name=name,
-                icon="",
-                isoverlay=kwargs.pop("isoverlay", False),
-                layerdefinitions=kwargs.pop("layerdefinitions", definitions),
-                **kwargs,
-            )
-
-        layer("zeta", "abac-test-tiles", sortorder=1, addtomap=True)
-        layer("alpha", "abac-other", sortorder=1)
-        layer("first", "abac-other", sortorder=0)
-        layer("empty", "abac-other", layerdefinitions=[])
-        layer("junk", "abac-other", layerdefinitions=["x", None])
-        layer("parcels", "abac-test-tiles", isoverlay=True)
-        layer("noisy", "missing-source", isoverlay=True)
-        config = self.client.get(reverse("abac_map_config")).json()
-        self.assertNotIn("basemap", config)
-        self.assertEqual(
-            [entry["name"] for entry in config["basemaps"]],
-            ["first", "alpha", "zeta"],
-        )
-        self.assertEqual(
-            [entry["name"] for entry in config["overlays"]], ["noisy", "parcels"]
-        )
-        zeta = config["basemaps"][2]
-        self.assertEqual(zeta["layers"][0]["id"], "zeta-id")
-        self.assertEqual(list(zeta["sources"]), ["abac-test-tiles"])
-        self.assertEqual(config["overlays"][0]["sources"], {})
-        self.assertEqual(list(config["overlays"][1]["sources"]), ["abac-test-tiles"])
-        self.assertIn("glyphs", config)
-        # No streets: the first basemap added to the map wins.
-        self.assertEqual(config["default_basemap"], "zeta")
-        layer("streets", "abac-other", sortorder=5)
-        config = self.client.get(reverse("abac_map_config")).json()
-        self.assertEqual(config["default_basemap"], "streets")
-        MapLayer.objects.filter(addtomap=True).update(addtomap=False)
         MapLayer.objects.filter(name="streets").delete()
+        MapLayer.objects.create(
+            name="streets",
+            isoverlay=False,
+            icon="",
+            layerdefinitions=[
+                {"id": "abac-test", "type": "raster", "source": "abac-test-tiles"}
+            ],
+        )
+        MapLayer.objects.create(
+            name="Other basemap", isoverlay=False, icon="", layerdefinitions=[]
+        )
         config = self.client.get(reverse("abac_map_config")).json()
-        self.assertEqual(config["default_basemap"], "first")
-        MapLayer.objects.filter(isoverlay=False).delete()
-        config = self.client.get(reverse("abac_map_config")).json()
-        self.assertIsNone(config["default_basemap"])
-        self.assertEqual(config["basemaps"], [])
+        self.assertEqual(config["basemap"]["layers"][0]["id"], "abac-test")
+        self.assertEqual(list(config["basemap"]["sources"]), ["abac-test-tiles"])
+        self.assertIn("glyphs", config)

@@ -8,18 +8,21 @@ import type { VueWrapper } from "@vue/test-utils";
 import type { SpatialDefinition } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const api = vi.hoisted(() => ({
-    fetchMapConfig: vi.fn(),
     fetchGeometryNodes: vi.fn(),
     fetchResourceModels: vi.fn(),
 }));
 const toastAdd = vi.hoisted(() => vi.fn());
 
 vi.mock("@/arches_abac_permissions/rule-types/spatial/api.ts", () => api);
+vi.mock(
+    "@/arches_abac_permissions/rule-types/spatial/SpatialRuleForm/components/AreaMap/AreaMap.vue",
+    () => ({ default: { name: "AreaMap", template: "<div />" } }),
+);
 vi.mock("openvue/usetoast", () => ({ useToast: () => ({ add: toastAdd }) }));
 
 const AreaMapStub = {
     name: "AreaMap",
-    props: ["modelValue", "config", "buffer", "describedBy"],
+    props: ["modelValue", "buffer", "describedBy"],
     template: "<div class='area-map-stub' />",
 };
 
@@ -30,7 +33,6 @@ const stubs = {
         template: "<button type='button'>{{ label }}</button>",
     },
     Message: { template: "<div role='alert'><slot /></div>" },
-    ProgressSpinner: true,
     InputNumber: {
         name: "InputNumber",
         props: ["modelValue", "pt"],
@@ -87,20 +89,10 @@ describe("SpatialRuleForm", () => {
         api.fetchResourceModels.mockResolvedValue([
             { graphid: "g", name: "Places" },
         ]);
-        api.fetchMapConfig.mockResolvedValue({
-            basemaps: [],
-            overlays: [],
-            default_basemap: null,
-            bounds: null,
-            min_zoom: 0,
-            max_zoom: 20,
-            sprite: "",
-            glyphs: "",
-        });
         api.fetchGeometryNodes.mockResolvedValue([]);
     });
 
-    it("loads models, geometry nodes and the map", async () => {
+    it("loads models and geometry nodes", async () => {
         const wrapper = mountForm({ graphid: "g" });
         await flushPromises();
         expect(api.fetchResourceModels).toHaveBeenCalled();
@@ -281,15 +273,6 @@ describe("SpatialRuleForm", () => {
             operator: "centroid",
         });
         expect(wrapper.find("#abac-area-help").text()).toContain("centre");
-        wrapper.unmount();
-    });
-
-    it("shows an error when the map can't load", async () => {
-        api.fetchMapConfig.mockRejectedValue(new Error("Map unavailable"));
-        const wrapper = mountForm({});
-        await flushPromises();
-        expect(wrapper.findComponent(AreaMapStub).exists()).toBe(false);
-        expect(wrapper.text()).toContain("Map unavailable");
         wrapper.unmount();
     });
 });
