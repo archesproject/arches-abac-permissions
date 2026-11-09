@@ -61,11 +61,17 @@ const square: Polygon = {
 };
 const point: Point = { type: "Point", coordinates: [2, 3] };
 
-function feature(geometry: unknown, bufferDistance = 0) {
+function feature(
+    geometry: unknown,
+    bufferDistance = 0,
+    id = "a",
+    units = "meters",
+) {
     return {
         type: "Feature",
+        id,
         geometry,
-        properties: { buffer_distance: bufferDistance },
+        properties: { buffer_distance: bufferDistance, buffer_units: units },
     };
 }
 
@@ -186,5 +192,51 @@ describe("AreaMap", () => {
             role: "group",
             "aria-describedby": "help",
         });
+    });
+
+    it("adopts a buffer edited in the map tools for every shape", async () => {
+        const { wrapper } = mountMap({ modelValue: square });
+        const map = wrapper.findComponent({ name: "MapComponent" });
+        const other = feature(point, 0, "b");
+        const edited = feature(square, 2, "a", "kilometers");
+        context.drawnFeatures.value = [edited, other];
+        await map.vm.$emit("update:value", {
+            type: "FeatureCollection",
+            features: [feature(square, 0, "a")],
+        });
+        expect(wrapper.emitted("update:buffer")).toBeUndefined();
+        await map.vm.$emit("update:value", {
+            type: "FeatureCollection",
+            features: [edited, other],
+        });
+        expect(wrapper.emitted("update:buffer")).toEqual([[2000]]);
+        expect(context.setBufferForFeature).toHaveBeenCalledWith(
+            edited,
+            2000,
+            "meters",
+        );
+        expect(context.setBufferForFeature).toHaveBeenCalledWith(
+            other,
+            2000,
+            "meters",
+        );
+    });
+
+    it("gives newly drawn shapes the current buffer", async () => {
+        const { wrapper } = mountMap({ modelValue: square, buffer: 30 });
+        const fresh = feature(point, 0, "new");
+        context.drawnFeatures.value = [fresh];
+        await wrapper
+            .findComponent({ name: "MapComponent" })
+            .vm.$emit("update:value", {
+                type: "FeatureCollection",
+                features: [fresh],
+            });
+        expect(wrapper.emitted("update:buffer")).toBeUndefined();
+        expect(context.setBufferForFeature).toHaveBeenCalledWith(
+            fresh,
+            30,
+            "meters",
+        );
     });
 });

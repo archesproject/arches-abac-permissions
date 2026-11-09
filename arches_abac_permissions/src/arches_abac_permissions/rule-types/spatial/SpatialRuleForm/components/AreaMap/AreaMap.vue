@@ -13,10 +13,18 @@ import {
     toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
 
-import type { FeatureCollection } from "geojson";
+import type { Feature, FeatureCollection } from "geojson";
 import type { AreaGeometry } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const METERS = "meters";
+const MAX_BUFFER = 100000;
+const METERS_PER_UNIT: Record<string, number> = {
+    meters: 1,
+    kilometers: 1000,
+    feet: 0.3048,
+    yards: 0.9144,
+    miles: 1609.344,
+};
 const TOOL_COUNT = 3; // Map Tools, Basemap, Overlays
 const STATUS_TYPES = [
     { types: ["Polygon"], one: "%{count} polygon", many: "%{count} polygons" },
@@ -28,6 +36,9 @@ const props = defineProps<{
     buffer?: number;
     describedBy?: string;
 }>();
+const emit = defineEmits<{
+    (event: "update:buffer", payload: number): void;
+}>();
 const area = defineModel<AreaGeometry | undefined>({ required: true });
 
 const { $gettext, $ngettext } = useGettext();
@@ -35,7 +46,10 @@ const { $gettext, $ngettext } = useGettext();
 const interactionTools = useDefaultMapInteractionTools().slice(0, TOOL_COUNT);
 
 const mapRef = useTemplateRef<InstanceType<typeof MapComponent>>("map");
-const bufferDistance = computed(() => props.buffer ?? 0);
+// The definition holds one buffer; whichever shape's buffer the user edits in
+// the map tools becomes the buffer for every shape.
+const bufferDistance = ref(props.buffer ?? 0);
+const knownFeatureIds = new Set<string>();
 
 // Only the initial value is read by the map; later changes go through
 // syncMap and update:value.
@@ -58,7 +72,13 @@ const status = computed(() => {
 
 const syncedArea = ref(areaKey(area.value));
 
-watch(bufferDistance, applyBuffer);
+watch(
+    () => props.buffer,
+    (buffer) => {
+        bufferDistance.value = buffer ?? 0;
+        applyBuffer();
+    },
+);
 watch(area, syncMap);
 
 function areaKey(geometry: AreaGeometry | undefined): string {
@@ -80,13 +100,41 @@ function withBuffer(collection: FeatureCollection): FeatureCollection {
 function applyBuffer(): void {
     const context = mapRef.value?.context;
     for (const feature of context?.drawnFeatures.value ?? []) {
-        if (feature.properties?.buffer_distance !== bufferDistance.value) {
+        if (
+            feature.properties?.buffer_distance !== bufferDistance.value ||
+            feature.properties?.buffer_units !== METERS
+        ) {
             context!.setBufferForFeature(feature, bufferDistance.value, METERS);
         }
     }
 }
 
+function metersOf(feature: Feature): number {
+    const properties = feature.properties ?? {};
+    const factor = METERS_PER_UNIT[properties.buffer_units] ?? 1;
+    const distance = Number(properties.buffer_distance);
+    return Number.isFinite(distance)
+        ? Math.min(Math.max(distance * factor, 0), MAX_BUFFER)
+        : 0;
+}
+
+function adoptEditedBuffer(features: Feature[]): void {
+    const edited = features.find(
+        (feature) =>
+            knownFeatureIds.has(String(feature.id)) &&
+            metersOf(feature) !== bufferDistance.value,
+    );
+    for (const feature of features) {
+        knownFeatureIds.add(String(feature.id));
+    }
+    if (edited) {
+        bufferDistance.value = Math.round(metersOf(edited) * 100) / 100;
+        emit("update:buffer", bufferDistance.value);
+    }
+}
+
 function onValueUpdate(collection: FeatureCollection): void {
+    adoptEditedBuffer(collection.features);
     const next = areaOf(
         collection.features.flatMap((feature) => partsOf(feature.geometry)),
     );

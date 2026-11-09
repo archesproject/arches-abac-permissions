@@ -323,7 +323,7 @@ The map is core's map component: its tabs offer every basemap and overlay map la
 Things to be aware of:
 
 - **The area is GeoJSON in longitude/latitude (WGS 84):** a polygon, point or line (or their `Multi*` forms), or a flat `GeometryCollection` of them mixing types. Only `type`, `coordinates` and `geometries` are kept, so any `crs` is dropped.
-- **`buffer` is an optional distance in meters (0 to 100,000), and is required for points and lines.** Each part is buffered with PostGIS geography, so the distance is accurate at any latitude, and the buffered parts are merged. The map previews the buffer, but the backend result is authoritative. The buffered area must stay within the limits below.
+- **`buffer` is an optional distance in meters (0 to 100,000), and is required for points and lines.** Each part is buffered with PostGIS geography, so the distance is accurate at any latitude, and the buffered parts are merged. Set it with the map's built-in **Buffer** control in Map Tools (any unit; it is converted to meters and applied to every shape). The map previews the buffer, but the backend result is authoritative. The buffered area must stay within the limits below.
 - The area may have at most 10,000 vertices and be at most 180° of longitude wide; areas crossing the antimeridian aren't supported. Overlapping polygons are merged.
 - Nodes of draft resource models can't be used; publish the model first.
 - **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.

@@ -33,12 +33,6 @@ const stubs = {
         template: "<button type='button'>{{ label }}</button>",
     },
     Message: { template: "<div role='alert'><slot /></div>" },
-    InputNumber: {
-        name: "InputNumber",
-        props: ["modelValue", "pt"],
-        emits: ["update:modelValue"],
-        template: "<input type='number' :value='modelValue' />",
-    },
     Select: true,
     Textarea: {
         props: ["modelValue"],
@@ -141,26 +135,15 @@ describe("SpatialRuleForm", () => {
         wrapper.unmount();
     });
 
-    it("sets and clears the buffer and passes it to the map", async () => {
+    it("stores the map's buffer and passes it back", async () => {
         const wrapper = mountForm({ graphid: "g", nodeid: "n" });
         await flushPromises();
-        const input = wrapper.findComponent({ name: "InputNumber" });
-        expect(input.props("pt")).toEqual({
-            pcInputText: { root: { "aria-describedby": "abac-buffer-help" } },
-        });
-        expect(wrapper.find("#abac-buffer-help").text()).toContain(
-            "greater than 0",
-        );
-        input.vm.$emit("update:modelValue", 250);
+        const map = wrapper.findComponent(AreaMapStub);
+        map.vm.$emit("update:buffer", 250);
         await flushPromises();
         expect(lastDefinition(wrapper).buffer).toBe(250);
-        expect(wrapper.findComponent(AreaMapStub).props("buffer")).toBe(250);
-        input.vm.$emit("update:modelValue", 0);
-        await flushPromises();
-        expect("buffer" in lastDefinition(wrapper)).toBe(false);
-        input.vm.$emit("update:modelValue", 5);
-        await flushPromises();
-        input.vm.$emit("update:modelValue", null);
+        expect(map.props("buffer")).toBe(250);
+        map.vm.$emit("update:buffer", 0);
         await flushPromises();
         expect("buffer" in lastDefinition(wrapper)).toBe(false);
         wrapper.unmount();

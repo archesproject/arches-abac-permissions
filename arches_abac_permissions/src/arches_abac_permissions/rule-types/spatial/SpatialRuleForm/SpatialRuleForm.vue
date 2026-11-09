@@ -18,7 +18,6 @@ import {
     fetchResourceModels,
 } from "@/arches_abac_permissions/rule-types/spatial/api.ts";
 import {
-    needsBuffer,
     parseArea,
     toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
@@ -101,8 +100,6 @@ const area = computed({
         definition.value = { ...definition.value, geometry };
     },
 });
-
-const requiresBuffer = computed(() => needsBuffer(area.value));
 
 watchEffect(loadResourceModels);
 watchEffect(loadNodes);
@@ -283,8 +280,8 @@ function applyGeoJson(): void {
         <AreaMap
             v-model="area"
             :buffer="definition.buffer"
-            @update:buffer="onBufferChange"
             :described-by="AREA_HELP_ID"
+            @update:buffer="onBufferChange"
         />
         <details
             class="geojson"
