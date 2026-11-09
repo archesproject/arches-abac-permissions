@@ -2,7 +2,10 @@
 import { computed, ref, useTemplateRef, watch } from "vue";
 import { useGettext } from "vue3-gettext";
 
-import { MapComponent } from "@/arches_vue_components/components";
+import {
+    MapComponent,
+    useDefaultMapInteractionTools,
+} from "@/arches_vue_components/components";
 
 import {
     areaOf,
@@ -14,6 +17,7 @@ import type { FeatureCollection } from "geojson";
 import type { AreaGeometry } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const METERS = "meters";
+const TOOL_COUNT = 3; // Map Tools, Basemap, Overlays
 const STATUS_TYPES = [
     { types: ["Polygon"], one: "%{count} polygon", many: "%{count} polygons" },
     { types: ["Point"], one: "%{count} point", many: "%{count} points" },
@@ -27,6 +31,8 @@ const props = defineProps<{
 const area = defineModel<AreaGeometry | undefined>({ required: true });
 
 const { $gettext, $ngettext } = useGettext();
+
+const interactionTools = useDefaultMapInteractionTools().slice(0, TOOL_COUNT);
 
 const mapRef = useTemplateRef<InstanceType<typeof MapComponent>>("map");
 const bufferDistance = computed(() => props.buffer ?? 0);
@@ -116,6 +122,7 @@ function syncMap(geometry: AreaGeometry | undefined): void {
             <MapComponent
                 ref="map"
                 :value="initialValue"
+                :interaction-tools="interactionTools"
                 @update:value="onValueUpdate"
             />
         </div>

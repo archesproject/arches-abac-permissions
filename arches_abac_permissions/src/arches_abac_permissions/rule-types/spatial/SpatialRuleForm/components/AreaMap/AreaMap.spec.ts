@@ -32,9 +32,13 @@ const context = vi.hoisted(() => ({
 }));
 
 vi.mock("@/arches_vue_components/components", () => ({
+    useDefaultMapInteractionTools: () =>
+        ["tools", "basemap", "overlays", "legend", "settings"].map((name) => ({
+            name,
+        })),
     MapComponent: {
         name: "MapComponent",
-        props: ["value"],
+        props: ["value", "interactionTools"],
         emits: ["update:value"],
         setup(_: unknown, { expose }: { expose: (api: unknown) => void }) {
             expose({ context });
@@ -102,6 +106,18 @@ describe("AreaMap", () => {
         expect(wrapper.find("[role=status]").text()).toBe(
             "The area has 1 polygon.",
         );
+    });
+
+    it("offers only map tools, basemaps and overlays", () => {
+        const { wrapper } = mountMap();
+        const tools = wrapper
+            .findComponent({ name: "MapComponent" })
+            .props("interactionTools") as { name: string }[];
+        expect(tools.map((tool) => tool.name)).toEqual([
+            "tools",
+            "basemap",
+            "overlays",
+        ]);
     });
 
     it("reports drawn features as an area", async () => {
