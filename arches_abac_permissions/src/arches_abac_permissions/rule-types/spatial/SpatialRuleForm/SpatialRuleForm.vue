@@ -3,7 +3,6 @@ import { computed, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Button from "openvue/button";
-import InputNumber from "openvue/inputnumber";
 import Select from "openvue/select";
 import Textarea from "openvue/textarea";
 import { useToast } from "openvue/usetoast";
@@ -35,7 +34,6 @@ import type {
 
 const AREA_HELP_ID = "abac-area-help";
 const GEOJSON_ERROR_ID = "abac-area-geojson-error";
-const BUFFER_HELP_ID = "abac-buffer-help";
 const MAX_BUFFER = 100000;
 const DEFAULT_OPERATOR: SpatialOperator = "intersects";
 
@@ -173,7 +171,7 @@ function onOperatorChange(selected: SpatialOperator | null): void {
     };
 }
 
-function onBufferChange(meters: number | null): void {
+function onBufferChange(meters: number): void {
     const rest = { ...definition.value };
     delete rest.buffer;
     definition.value = meters ? { ...rest, buffer: meters } : rest;
@@ -274,38 +272,18 @@ function applyGeoJson(): void {
         >
             {{ areaHelp }}
         </p>
-        <div class="buffer-field">
-            <label for="abac-buffer">{{ $gettext("Buffer (meters)") }}</label>
-            <InputNumber
-                input-id="abac-buffer"
-                :model-value="definition.buffer ?? null"
-                :min="0"
-                :max="MAX_BUFFER"
-                :step="1"
-                :use-grouping="false"
-                :pt="{
-                    pcInputText: {
-                        root: { 'aria-describedby': BUFFER_HELP_ID },
-                    },
-                }"
-                :invalid="requiresBuffer && !definition.buffer"
-                @update:model-value="onBufferChange"
-            />
-            <p
-                :id="BUFFER_HELP_ID"
-                class="area-help"
-            >
-                {{
-                    $gettext(
-                        "Points and lines need a buffer greater than 0. The buffer is applied to every part of the area, up to %{max} meters.",
-                        { max: String(MAX_BUFFER) },
-                    )
-                }}
-            </p>
-        </div>
+        <p class="area-help">
+            {{
+                $gettext(
+                    "Set a buffer for a shape in the Map Tools panel. Points and lines need a buffer greater than 0. The buffer is applied to every part of the area, up to %{max} meters.",
+                    { max: String(MAX_BUFFER) },
+                )
+            }}
+        </p>
         <AreaMap
             v-model="area"
             :buffer="definition.buffer"
+            @update:buffer="onBufferChange"
             :described-by="AREA_HELP_ID"
         />
         <details
@@ -377,13 +355,6 @@ function applyGeoJson(): void {
     margin: 0;
     font-size: 1.15rem;
     color: var(--p-abac-text-secondary);
-}
-
-.buffer-field {
-    display: flex;
-    flex-direction: column;
-    align-items: flex-start;
-    gap: 0.6rem;
 }
 
 .geojson-actions {
