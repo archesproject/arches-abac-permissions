@@ -299,3 +299,7 @@ Create an inclusion rule in the admin as described in [Creating a lifecycle stat
 ```bash
 python manage.py test tests --settings="tests.test_settings"
 ```
+
+### Acknowledgments
+
+This extension combines learnings and code across Arches implementations from 2023 onwards, supported through projects funded by [TODO: Farallon acknowledgments], the NI Historic Environments Division; the Queensland Department of the Environment, Tourism, Science and Innovation; and the Getty Conservation Institute.
