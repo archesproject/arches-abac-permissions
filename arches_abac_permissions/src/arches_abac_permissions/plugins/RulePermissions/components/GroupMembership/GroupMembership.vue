@@ -755,7 +755,8 @@ async function loadActiveUserDetails(): Promise<void> {
     grid-template-columns: 46rem 46rem minmax(32rem, 1fr);
 }
 
-@media (max-width: 87.5rem) {
+/* Media-query rem ignores Arches' 62.5% root: 75rem is 1200px, matching By Rule. */
+@media (max-width: 75rem) {
     .membership-columns,
     .membership-columns.with-editor {
         grid-template-columns: 1fr;
