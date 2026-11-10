@@ -4,7 +4,6 @@ import { request } from "@/arches_abac_permissions/api.ts";
 
 import type {
     GeometryNode,
-    MapConfig,
     ResourceModel,
 } from "@/arches_abac_permissions/rule-types/spatial/types";
 
@@ -27,6 +26,3 @@ export const fetchGeometryNodes = async (
         )
     ).nodes;
 };
-
-export const fetchMapConfig = (): Promise<MapConfig> =>
-    request<MapConfig>(arches.urls.abac_map_config);

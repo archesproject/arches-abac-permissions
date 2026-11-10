@@ -1,257 +1,182 @@
 <script setup lang="ts">
-import { computed, onBeforeUnmount, onMounted, ref, watch } from "vue";
+import { computed, ref, useTemplateRef, watch } from "vue";
 import { useGettext } from "vue3-gettext";
 
-import MapboxDraw from "@mapbox/mapbox-gl-draw";
 import {
-    Map as MapLibreMap,
-    NavigationControl,
-    setWorkerUrl,
-} from "maplibre-gl";
-import "maplibre-gl/dist/maplibre-gl.css";
-
-import Button from "openvue/button";
+    MapComponent,
+    useDefaultMapInteractionTools,
+} from "@/arches_vue_components/components";
 
 import {
     areaOf,
-    polygonsOf,
+    partsOf,
+    toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
 
-import type { Feature, FeatureCollection, Polygon, Position } from "geojson";
-import type {
-    IControl,
-    LayerSpecification,
-    LngLatBoundsLike,
-    StyleSpecification,
-} from "maplibre-gl";
-import type {
-    AreaGeometry,
-    MapConfig,
-} from "@/arches_abac_permissions/rule-types/spatial/types";
+import type { Feature, FeatureCollection } from "geojson";
+import type { AreaGeometry } from "@/arches_abac_permissions/rule-types/spatial/types";
 
-// The subset of mapbox-gl-draw used here; the package ships no types.
-interface DrawControl extends IControl {
-    set(collection: FeatureCollection): void;
-    getAll(): FeatureCollection;
-    changeMode(mode: string): void;
-    trash(): void;
-    deleteAll(): void;
-}
+const METERS = "meters";
+const MAX_BUFFER = 100000;
+const METERS_PER_UNIT: Record<string, number> = {
+    meters: 1,
+    kilometers: 1000,
+    feet: 0.3048,
+    yards: 0.9144,
+    miles: 1609.344,
+};
+const TOOL_COUNT = 3; // Map Tools, Basemap, Overlays
+const STATUS_TYPES = [
+    { types: ["Polygon"], one: "%{count} polygon", many: "%{count} polygons" },
+    { types: ["Point"], one: "%{count} point", many: "%{count} points" },
+    { types: ["LineString"], one: "%{count} line", many: "%{count} lines" },
+];
 
-// Serve the worker as a webpack-emitted asset, as arches core does.
-setWorkerUrl(
-    new URL("maplibre-gl/dist/maplibre-gl-worker.mjs", import.meta.url).href,
-);
-new URL("maplibre-gl/dist/maplibre-gl-shared.mjs?asset", import.meta.url);
-
-const DRAW_POLYGON = "draw_polygon";
-const SIMPLE_SELECT = "simple_select";
-
-const props = defineProps<{ config: MapConfig; describedBy?: string }>();
+const props = defineProps<{
+    buffer?: number;
+    describedBy?: string;
+}>();
+const emit = defineEmits<{
+    (event: "update:buffer", payload: number): void;
+}>();
 const area = defineModel<AreaGeometry | undefined>({ required: true });
 
 const { $gettext, $ngettext } = useGettext();
 
-const container = ref<HTMLElement>();
-const isDrawing = ref(false);
-const hasSelection = ref(false);
+const interactionTools = useDefaultMapInteractionTools().slice(0, TOOL_COUNT);
 
-let map: MapLibreMap | null = null;
-let draw: DrawControl | null = null;
-// The area last read from the map, to tell our own updates from outside ones.
-let syncedArea = "";
-let isLoaded = false;
+const mapRef = useTemplateRef<InstanceType<typeof MapComponent>>("map");
+// The definition holds one buffer; whichever shape's buffer the user edits in
+// the map tools becomes the buffer for every shape.
+const bufferDistance = ref(props.buffer ?? 0);
+// Features we hand to the map get ids here, so edits to them are recognised
+// even though the map doesn't emit for its initial value.
+const knownFeatureIds = new Set<string>();
+let nextFeatureId = 0;
 
-const polygonCount = computed(() => polygonsOf(area.value).length);
-const status = computed(() =>
-    polygonCount.value
-        ? $ngettext(
-              "The area has %{count} polygon.",
-              "The area has %{count} polygons.",
-              polygonCount.value,
-              { count: String(polygonCount.value) },
-          )
-        : $gettext("No area has been drawn."),
+// Only the initial value is read by the map; later changes go through
+// syncMap and update:value.
+const initialValue = withBuffer(toFeatureCollection(area.value));
+
+const parts = computed(() => partsOf(area.value));
+const status = computed(() => {
+    const counts = STATUS_TYPES.map(({ types, one, many }) => {
+        const count = parts.value.filter((part) =>
+            types.includes(part.type),
+        ).length;
+        return count
+            ? $ngettext(one, many, count, { count: String(count) })
+            : "";
+    }).filter(Boolean);
+    return counts.length
+        ? $gettext("The area has %{counts}.", { counts: counts.join(", ") })
+        : $gettext("No area has been drawn.");
+});
+
+const syncedArea = ref(areaKey(area.value));
+
+watch(
+    () => props.buffer,
+    (buffer) => {
+        bufferDistance.value = buffer ?? 0;
+        applyBuffer();
+    },
 );
+watch(area, syncMap);
 
-watch(area, (geometry) => {
-    if (JSON.stringify(geometry ?? null) !== syncedArea) {
-        showArea(geometry, true);
+function areaKey(geometry: AreaGeometry | undefined): string {
+    return JSON.stringify(areaOf(partsOf(geometry)) ?? null);
+}
+
+function withBuffer(collection: FeatureCollection): FeatureCollection {
+    for (const feature of collection.features) {
+        feature.id = `abac-${nextFeatureId++}`;
+        knownFeatureIds.add(String(feature.id));
+        feature.properties = {
+            ...feature.properties,
+            buffer_distance: bufferDistance.value,
+            buffer_units: METERS,
+        };
     }
-});
-
-onMounted(() => {
-    const bounds = boundsOf(area.value) ?? props.config.bounds ?? undefined;
-    map = new MapLibreMap({
-        container: container.value!,
-        style: buildStyle(),
-        bounds,
-        fitBoundsOptions: { padding: 40, maxZoom: 16 },
-        minZoom: props.config.min_zoom,
-        maxZoom: props.config.max_zoom,
-        attributionControl: { compact: true },
-    });
-    map.getCanvas().setAttribute("aria-label", $gettext("Area map"));
-    if (props.describedBy) {
-        map.getCanvas().setAttribute("aria-describedby", props.describedBy);
-    }
-    map.addControl(new NavigationControl({ showCompass: false }));
-    draw = new MapboxDraw({
-        displayControlsDefault: false,
-        defaultMode: SIMPLE_SELECT,
-    }) as DrawControl;
-    map.addControl(draw);
-    map.on("load", () => {
-        isLoaded = true;
-        showArea(area.value, false);
-    });
-    onDraw("draw.create", readArea);
-    onDraw("draw.update", readArea);
-    onDraw("draw.delete", readArea);
-    onDraw<{ mode: string }>("draw.modechange", (event) => {
-        isDrawing.value = event.mode === DRAW_POLYGON;
-    });
-    onDraw<{ features: Feature[] }>("draw.selectionchange", (event) => {
-        hasSelection.value = event.features.length > 0;
-    });
-});
-
-onBeforeUnmount(() => {
-    map?.remove();
-    map = null;
-    draw = null;
-    isLoaded = false;
-});
-
-// Layers without their source are dropped; one would stop the style loading.
-function buildStyle(): StyleSpecification {
-    const sources = props.config.basemap?.sources ?? {};
-    const layers = (props.config.basemap?.layers ?? []).filter(
-        (layer) => !layer.source || (layer.source as string) in sources,
-    );
-    return {
-        version: 8,
-        ...(props.config.sprite ? { sprite: props.config.sprite } : {}),
-        ...(props.config.glyphs ? { glyphs: props.config.glyphs } : {}),
-        sources,
-        layers: layers as LayerSpecification[],
-    } as StyleSpecification;
+    return collection;
 }
 
-function boundsOf(geometry: AreaGeometry | undefined): LngLatBoundsLike | null {
-    const positions: Position[] = polygonsOf(geometry).flatMap(
-        (polygon) => polygon.coordinates.flat() as Position[],
-    );
-    if (!positions.length) {
-        return null;
-    }
-    const xs = positions.map((position) => position[0]);
-    const ys = positions.map((position) => position[1]);
-    return [
-        [Math.min(...xs), Math.min(...ys)],
-        [Math.max(...xs), Math.max(...ys)],
-    ];
-}
-
-function showArea(geometry: AreaGeometry | undefined, fit: boolean): void {
-    syncedArea = JSON.stringify(geometry ?? null);
-    if (!draw || !isLoaded) {
-        return;
-    }
-    const features: Feature<Polygon>[] = polygonsOf(geometry).map(
-        (polygon) => ({ type: "Feature", properties: {}, geometry: polygon }),
-    );
-    draw.set({ type: "FeatureCollection", features });
-    hasSelection.value = false;
-    const bounds = boundsOf(geometry);
-    if (fit && bounds && map) {
-        map.fitBounds(bounds, { padding: 40, maxZoom: 16, duration: 0 });
-    }
-}
-
-function readArea(): void {
-    if (!draw) {
-        return;
-    }
-    const geometries = draw
-        .getAll()
-        .features.map((feature) => feature.geometry);
-    const next = areaOf(geometries);
-    syncedArea = JSON.stringify(next ?? null);
-    area.value = next;
-}
-
-function startDrawing(): void {
-    draw?.changeMode(isDrawing.value ? SIMPLE_SELECT : DRAW_POLYGON);
-    isDrawing.value = !isDrawing.value;
-}
-
-function deleteSelected(): void {
-    draw?.trash();
-    readArea();
-}
-
-function clearArea(): void {
-    draw?.deleteAll();
-    isDrawing.value = false;
-    readArea();
-}
-
-// Draw events aren't part of maplibre's typed event map.
-function onDraw<T>(type: string, listener: (event: T) => void): void {
-    (
-        map as unknown as {
-            on: (type: string, listener: (event: T) => void) => void;
+// Preview only; the backend buffers the saved geometry.
+function applyBuffer(): void {
+    const context = mapRef.value?.context;
+    for (const feature of context?.drawnFeatures.value ?? []) {
+        if (
+            feature.properties?.buffer_distance !== bufferDistance.value ||
+            feature.properties?.buffer_units !== METERS
+        ) {
+            context!.setBufferForFeature(feature, bufferDistance.value, METERS);
         }
-    ).on(type, listener);
+    }
+}
+
+function metersOf(feature: Feature): number {
+    const properties = feature.properties ?? {};
+    const factor = METERS_PER_UNIT[properties.buffer_units] ?? 1;
+    const distance = Number(properties.buffer_distance);
+    return Number.isFinite(distance)
+        ? Math.min(Math.max(distance * factor, 0), MAX_BUFFER)
+        : 0;
+}
+
+function adoptEditedBuffer(features: Feature[]): void {
+    const edited = features.find(
+        (feature) =>
+            knownFeatureIds.has(String(feature.id)) &&
+            metersOf(feature) !== bufferDistance.value,
+    );
+    for (const feature of features) {
+        knownFeatureIds.add(String(feature.id));
+    }
+    if (edited) {
+        bufferDistance.value = Math.round(metersOf(edited) * 100) / 100;
+        emit("update:buffer", bufferDistance.value);
+    }
+}
+
+function onValueUpdate(collection: FeatureCollection): void {
+    adoptEditedBuffer(collection.features);
+    const next = areaOf(
+        collection.features.flatMap((feature) => partsOf(feature.geometry)),
+    );
+    const key = areaKey(next);
+    if (key !== syncedArea.value) {
+        syncedArea.value = key;
+        area.value = next;
+    }
+    applyBuffer();
+}
+
+// Pushes a change made outside the map (e.g. pasted GeoJSON) onto it.
+function syncMap(geometry: AreaGeometry | undefined): void {
+    const key = areaKey(geometry);
+    const context = mapRef.value?.context;
+    if (key === syncedArea.value || !context?.map.value) {
+        return;
+    }
+    syncedArea.value = key;
+    context.deleteAllDrawnFeatures();
+    context.addFeatures(withBuffer(toFeatureCollection(geometry)).features);
 }
 </script>
 
 <template>
     <div class="area-map">
         <div
-            class="area-toolbar"
-            role="toolbar"
-            :aria-label="$gettext('Area tools')"
-        >
-            <Button
-                size="small"
-                icon="pi pi-pencil"
-                :label="
-                    isDrawing
-                        ? $gettext('Stop Drawing')
-                        : $gettext('Draw Polygon')
-                "
-                :aria-pressed="isDrawing"
-                @click="startDrawing"
-            />
-            <Button
-                size="small"
-                severity="secondary"
-                variant="outlined"
-                icon="pi pi-trash"
-                :label="$gettext('Delete Selected')"
-                :disabled="!hasSelection"
-                @click="deleteSelected"
-            />
-            <Button
-                size="small"
-                severity="secondary"
-                variant="outlined"
-                icon="pi pi-times"
-                :label="$gettext('Clear Area')"
-                :disabled="!polygonCount"
-                @click="clearArea"
-            />
-        </div>
-        <!-- Vue must not bind classes on maplibre's container; it'd drop maplibre's own. -->
-        <div
             class="map-frame"
-            :class="{ drawing: isDrawing }"
+            role="group"
+            :aria-label="$gettext('Area map')"
+            :aria-describedby="describedBy"
         >
-            <div
-                ref="container"
-                class="map-container"
+            <MapComponent
+                ref="map"
+                :value="initialValue"
+                :interaction-tools="interactionTools"
+                @update:value="onValueUpdate"
             />
         </div>
         <p
@@ -271,33 +196,12 @@ function onDraw<T>(type: string, listener: (event: T) => void): void {
     max-inline-size: 90rem;
 }
 
-.area-toolbar {
-    display: flex;
-    flex-wrap: wrap;
-    align-items: center;
-    gap: 0.6rem;
-}
-
 .map-frame {
-    block-size: 36rem;
+    block-size: 48rem;
     background: var(--p-abac-surface-bg);
     border: 0.1rem solid var(--p-abac-border);
     border-radius: 0.6rem;
     overflow: hidden;
-}
-
-.map-container {
-    position: relative;
-    block-size: 100%;
-}
-
-.map-frame:focus-within {
-    outline: 0.2rem solid var(--p-abac-accent);
-    outline-offset: 0.2rem;
-}
-
-.map-frame.drawing :deep(.maplibregl-canvas-container) {
-    cursor: crosshair;
 }
 
 .area-status {

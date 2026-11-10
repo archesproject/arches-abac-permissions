@@ -4,34 +4,39 @@ import { useGettext } from "vue3-gettext";
 
 import Button from "openvue/button";
 import Message from "openvue/message";
-import ProgressSpinner from "openvue/progressspinner";
 import Select from "openvue/select";
 import Textarea from "openvue/textarea";
 import { useToast } from "openvue/usetoast";
 
 import {
     DEFAULT_ERROR_TOAST_LIFE,
+    DEFAULT_SUCCESS_TOAST_LIFE,
     ERROR,
+    SUCCESS,
 } from "@/arches_abac_permissions/constants.ts";
 import {
     fetchGeometryNodes,
-    fetchMapConfig,
     fetchResourceModels,
 } from "@/arches_abac_permissions/rule-types/spatial/api.ts";
-import { parseArea } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
+import {
+    needsBuffer,
+    parseArea,
+    toFeatureCollection,
+} from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
 import AreaMap from "@/arches_abac_permissions/rule-types/spatial/SpatialRuleForm/components/AreaMap/AreaMap.vue";
 
 import type {
     AreaGeometry,
     GeometryNode,
-    MapConfig,
     ResourceModel,
     SpatialDefinition,
     SpatialOperator,
 } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const AREA_HELP_ID = "abac-area-help";
+const BUFFER_WARNING_ID = "abac-area-buffer-warning";
 const GEOJSON_ERROR_ID = "abac-area-geojson-error";
+const MAX_BUFFER = 100000;
 const DEFAULT_OPERATOR: SpatialOperator = "intersects";
 
 const definition = defineModel<Partial<SpatialDefinition>>({
@@ -43,8 +48,6 @@ const toast = useToast();
 
 const resourceModels = ref<ResourceModel[]>([]);
 const nodes = ref<GeometryNode[]>([]);
-const mapConfig = ref<MapConfig | null>(null);
-const mapError = ref("");
 const isLoadingModels = ref(true);
 const isLoadingNodes = ref(false);
 const geoJsonText = ref("");
@@ -101,9 +104,15 @@ const area = computed({
     },
 });
 
+const bufferMissing = computed(
+    () => needsBuffer(area.value) && !((definition.value.buffer ?? 0) > 0),
+);
+const areaDescribedBy = computed(() =>
+    bufferMissing.value ? `${AREA_HELP_ID} ${BUFFER_WARNING_ID}` : AREA_HELP_ID,
+);
+
 watchEffect(loadResourceModels);
 watchEffect(loadNodes);
-watchEffect(loadMapConfig);
 
 function showError(summary: string, error: unknown): void {
     toast.add({
@@ -148,22 +157,12 @@ async function loadNodes(): Promise<void> {
     }
 }
 
-async function loadMapConfig(): Promise<void> {
-    try {
-        mapConfig.value = await fetchMapConfig();
-    } catch (error) {
-        mapError.value =
-            error instanceof Error
-                ? error.message
-                : $gettext("Unable to load the map");
-    }
-}
-
 function onModelChange(selectedGraphid: string | null): void {
     // Nodes belong to a model; the area and operator don't.
     definition.value = {
         graphid: selectedGraphid ?? undefined,
         geometry: definition.value.geometry,
+        buffer: definition.value.buffer,
         operator: definition.value.operator,
     };
 }
@@ -179,10 +178,31 @@ function onOperatorChange(selected: SpatialOperator | null): void {
     };
 }
 
+function onBufferChange(meters: number): void {
+    const rest = { ...definition.value };
+    delete rest.buffer;
+    definition.value = meters ? { ...rest, buffer: meters } : rest;
+}
+
+async function copyGeoJson(): Promise<void> {
+    try {
+        await navigator.clipboard.writeText(
+            JSON.stringify(toFeatureCollection(area.value), null, 2),
+        );
+        toast.add({
+            severity: SUCCESS,
+            life: DEFAULT_SUCCESS_TOAST_LIFE,
+            summary: $gettext("GeoJSON copied"),
+        });
+    } catch (error) {
+        showError($gettext("Unable to copy GeoJSON"), error);
+    }
+}
+
 function onGeoJsonToggle(event: Event): void {
     if ((event.target as HTMLDetailsElement).open) {
         geoJsonText.value = area.value
-            ? JSON.stringify(area.value, null, 2)
+            ? JSON.stringify(toFeatureCollection(area.value), null, 2)
             : "";
         geoJsonError.value = "";
     }
@@ -199,7 +219,7 @@ function applyGeoJson(): void {
         geoJsonError.value = "";
     } catch {
         geoJsonError.value = $gettext(
-            "Enter a GeoJSON Polygon or MultiPolygon, or a Feature or FeatureCollection of them.",
+            "Enter GeoJSON polygons, points or lines as a geometry, Feature, FeatureCollection or GeometryCollection.",
         );
     }
 }
@@ -259,24 +279,33 @@ function applyGeoJson(): void {
         >
             {{ areaHelp }}
         </p>
+        <p class="area-help">
+            {{
+                $gettext(
+                    "Set a buffer for a shape in the Map Tools panel. Points and lines need a buffer greater than 0. The buffer is applied to every part of the area, up to %{max} meters.",
+                    { max: String(MAX_BUFFER) },
+                )
+            }}
+        </p>
         <AreaMap
-            v-if="mapConfig"
             v-model="area"
-            :config="mapConfig"
-            :described-by="AREA_HELP_ID"
+            :buffer="definition.buffer"
+            :described-by="areaDescribedBy"
+            @update:buffer="onBufferChange"
         />
         <Message
-            v-else-if="mapError"
-            severity="error"
-            role="alert"
+            v-if="bufferMissing"
+            severity="warn"
+            :pt="{
+                root: {
+                    id: BUFFER_WARNING_ID,
+                    role: 'status',
+                    'aria-live': 'polite',
+                },
+            }"
         >
-            {{ mapError }}
+            {{ $gettext("Points and lines need a buffer greater than 0.") }}
         </Message>
-        <ProgressSpinner
-            v-else
-            class="map-spinner"
-            :aria-label="$gettext('Loading map')"
-        />
         <details
             class="geojson"
             @toggle="onGeoJsonToggle"
@@ -310,14 +339,25 @@ function applyGeoJson(): void {
                 >
                     {{ geoJsonError }}
                 </p>
-                <Button
-                    size="small"
-                    severity="secondary"
-                    variant="outlined"
-                    icon="pi pi-check"
-                    :label="$gettext('Apply GeoJSON')"
-                    @click="applyGeoJson"
-                />
+                <div class="geojson-actions">
+                    <Button
+                        size="small"
+                        severity="secondary"
+                        variant="outlined"
+                        icon="pi pi-check"
+                        :label="$gettext('Apply GeoJSON')"
+                        @click="applyGeoJson"
+                    />
+                    <Button
+                        size="small"
+                        severity="secondary"
+                        variant="outlined"
+                        icon="pi pi-copy"
+                        :label="$gettext('Copy GeoJSON')"
+                        :disabled="!area"
+                        @click="copyGeoJson"
+                    />
+                </div>
             </div>
         </details>
     </fieldset>
@@ -337,9 +377,10 @@ function applyGeoJson(): void {
     color: var(--p-abac-text-secondary);
 }
 
-.map-spinner {
-    inline-size: 3.2rem;
-    block-size: 3.2rem;
+.geojson-actions {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 0.6rem;
 }
 
 .geojson {

@@ -1,3 +1,4 @@
+import json
 import uuid
 
 from django.contrib.gis.geos import GEOSGeometry
@@ -14,7 +15,11 @@ from arches.app.models.models import (
     TileModel,
 )
 from arches.app.models.tile import Tile
-from arches_abac_permissions.rules.spatial_rule import parse_area
+from arches_abac_permissions.rules.spatial_rule import (
+    MAX_BUFFER,
+    SpatialRule,
+    parse_area,
+)
 from tests.test_inclusion_rules import make_rule
 from tests.test_views import ApiTestCase
 
@@ -69,12 +74,14 @@ class SpatialTestCase(ApiTestCase):
                 geom=GEOSGeometry(wkt, srid=4326),
             )
 
-    def definition(self, geometry=SQUARE, node=None, operator=None):
+    def definition(self, geometry=SQUARE, node=None, operator=None, buffer=None):
         definition = {
             "graphid": str(self.graph.pk),
             "nodeid": str((node or self.geometry_node).pk),
             "geometry": geometry,
         }
+        if buffer is not None:
+            definition["buffer"] = buffer
         if operator:
             definition["operator"] = operator
         return definition
@@ -256,10 +263,14 @@ class SpatialRuleTests(SpatialTestCase):
             {**self.definition(), "graphid": str(self.other_graph.pk)},
             self.definition(node=self.string_node),
             self.definition(geometry="POLYGON ((0 0, 1 0, 1 1, 0 0))"),
-            self.definition(geometry={"type": "Point", "coordinates": [0, 0]}),
             self.definition(geometry={"type": "Polygon", "coordinates": "x"}),
             self.definition(geometry={"type": "Polygon", "coordinates": []}),
             self.definition(geometry=bowtie),
+            self.definition(geometry={"type": "Point", "coordinates": [0, 0]}),
+            self.definition(
+                geometry={"type": "Point", "coordinates": [0, 0]}, buffer=0
+            ),
+            self.definition(geometry={"type": "Circle", "coordinates": [0, 0]}),
             self.definition(operator="not intersects"),
             {**self.definition(), "graphid": "not-a-uuid"},
             # Crosses the antimeridian, so would be read as 340° wide.
@@ -294,6 +305,193 @@ class SpatialRuleTests(SpatialTestCase):
         self.assertIn(f"abac_geom_node_{node.pk.hex}", sql)
         self.assertIn("ON geojson_geometries USING gist (geom)", sql)
         self.assertIn(f"WHERE nodeid = '{node.pk}'", sql)
+
+
+class BufferedSpatialRuleTests(SpatialTestCase):
+    POINT = {"type": "Point", "coordinates": [30, 0]}
+    LINE = {"type": "LineString", "coordinates": [[40, 0], [41, 0]]}
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        # Near the equator one degree is about 111 km.
+        cls.near_point = cls.make_resource(cls.graph, cls.active_state)
+        cls.far_point = cls.make_resource(cls.graph, cls.active_state)
+        cls.near_line = cls.make_resource(cls.graph, cls.active_state)
+        cls.add_geometry(cls.near_point, cls.geometry_node, "POINT (30.3 0)")
+        cls.add_geometry(cls.far_point, cls.geometry_node, "POINT (31 0)")
+        cls.add_geometry(cls.near_line, cls.geometry_node, "POINT (40.5 0.2)")
+
+    def matches(self, **kwargs):
+        rule = self.make_spatial_rule(**kwargs)
+        rule.clean()
+        return set(rule.get_matching_resources())
+
+    def test_buffered_point(self):
+        self.assertEqual(
+            self.matches(geometry=self.POINT, buffer=50000), {self.near_point}
+        )
+        self.assertEqual(
+            self.matches(geometry=self.POINT, buffer=100000), {self.near_point}
+        )
+
+    def test_buffered_multipoint(self):
+        geometry = {"type": "MultiPoint", "coordinates": [[30, 0], [31, 0]]}
+        self.assertEqual(self.matches(geometry=geometry, buffer=1000), {self.far_point})
+
+    def test_buffered_line(self):
+        self.assertEqual(
+            self.matches(geometry=self.LINE, buffer=30000), {self.near_line}
+        )
+        self.assertEqual(self.matches(geometry=self.LINE, buffer=1000), set())
+
+    def test_mixed_collection(self):
+        geometry = {
+            "type": "GeometryCollection",
+            "geometries": [SQUARE, self.POINT],
+        }
+        self.assertEqual(
+            self.matches(geometry=geometry, buffer=50000),
+            {self.inside, self.crossing, self.near_point},
+        )
+
+    def test_polygon_buffer_grows_area(self):
+        # (11, 5) is outside the square, 111 km east of its edge at most.
+        resource = self.make_resource(self.graph, self.active_state)
+        self.add_geometry(resource, self.geometry_node, "POINT (10.5 5)")
+        self.assertNotIn(resource, self.matches())
+        self.assertIn(resource, self.matches(buffer=100000))
+        plain = parse_area(json.dumps(SQUARE, sort_keys=True), 0)
+        grown = parse_area(json.dumps(SQUARE, sort_keys=True), 100000)
+        self.assertGreater(grown.area, plain.area)
+
+    def test_many_parts_buffered_in_one_query(self):
+        parse_area.cache_clear()
+        geometry = {
+            "type": "MultiPoint",
+            "coordinates": [[index / 10, 0] for index in range(50)],
+        }
+        canonical = json.dumps(geometry, sort_keys=True)
+        with self.assertNumQueries(1):
+            area = parse_area(canonical, 1000)
+        self.assertEqual(area.srid, 4326)
+        self.assertIn(area.geom_type, ("Polygon", "MultiPolygon"))
+
+    def test_operators_with_buffered_area(self):
+        for operator in ("within", "centroid"):
+            with self.subTest(operator=operator):
+                self.assertEqual(
+                    self.matches(geometry=self.POINT, buffer=50000, operator=operator),
+                    {self.near_point},
+                )
+
+    def test_invalid_buffers(self):
+        for buffer in (-1, "10", True, float("nan"), float("inf"), MAX_BUFFER + 1):
+            with self.subTest(buffer=buffer):
+                rule = self.make_spatial_rule(geometry=SQUARE, buffer=1)
+                rule.definition["buffer"] = buffer
+                with self.assertRaises(ValidationError):
+                    rule.clean()
+
+    def test_points_and_lines_need_a_buffer(self):
+        for geometry in (
+            self.POINT,
+            self.LINE,
+            {"type": "GeometryCollection", "geometries": [SQUARE, self.POINT]},
+        ):
+            for buffer in (None, 0):
+                with self.subTest(geometry=geometry["type"], buffer=buffer):
+                    rule = self.make_spatial_rule(geometry=geometry, buffer=buffer)
+                    with self.assertRaises(ValidationError):
+                        rule.clean()
+
+    def test_buffer_past_limits_rejected(self):
+        for geometry in (
+            {"type": "Point", "coordinates": [0, 85]},
+            {"type": "Point", "coordinates": [179.9, 0]},
+        ):
+            with self.subTest(geometry=geometry):
+                rule = self.make_spatial_rule(geometry=geometry, buffer=50000)
+                with self.assertRaises(ValidationError):
+                    rule.clean()
+
+    def test_invalid_collections_rejected(self):
+        for geometry in (
+            {
+                "type": "GeometryCollection",
+                "geometries": [
+                    {"type": "GeometryCollection", "geometries": [self.POINT]}
+                ],
+            },
+            {"type": "GeometryCollection", "geometries": "x"},
+            {"type": "GeometryCollection", "geometries": ["x"]},
+            {"type": "GeometryCollection", "geometries": [{"type": "Circle"}]},
+            {"type": "GeometryCollection", "geometries": []},
+        ):
+            with self.subTest(geometry=str(geometry)):
+                rule = self.make_spatial_rule(geometry=geometry, buffer=1000)
+                with self.assertRaises(ValidationError):
+                    rule.clean()
+
+    def test_cache_distinguishes_buffers(self):
+        parse_area.cache_clear()
+        small = self.make_spatial_rule(geometry=self.POINT, buffer=1000)
+        large = self.make_spatial_rule(geometry=self.POINT, buffer=2000)
+        small.matches_resource(self.near_point)
+        large.matches_resource(self.near_point)
+        small.matches_resource(self.near_point)
+        self.assertEqual(parse_area.cache_info().misses, 2)
+        self.assertGreater(
+            SpatialRule.parse_definition(large.definition)[1].area,
+            SpatialRule.parse_definition(small.definition)[1].area,
+        )
+
+    def test_clean_definition_strips_extra_members(self):
+        geometry = {
+            "type": "GeometryCollection",
+            "crs": "x",
+            "geometries": [
+                {**self.POINT, "bbox": [1], "crs": "x"},
+                "not a dict",
+            ],
+        }
+        cleaned = SpatialRule.clean_definition(
+            {
+                "graphid": "g",
+                "nodeid": "n",
+                "geometry": geometry,
+                "buffer": 5,
+                "extra": 1,
+            },
+            SpatialRule.rule_type.definition_keys,
+        )
+        self.assertEqual(
+            cleaned["geometry"],
+            {"type": "GeometryCollection", "geometries": [self.POINT, "not a dict"]},
+        )
+        self.assertEqual(cleaned["buffer"], 5)
+        self.assertNotIn("extra", cleaned)
+        self.assertNotIn(
+            "buffer",
+            SpatialRule.clean_definition(
+                {"geometry": SQUARE}, SpatialRule.rule_type.definition_keys
+            ),
+        )
+
+    def test_buffer_through_api(self):
+        response = self.client.post(
+            reverse("abac_rules"),
+            data=json.dumps(
+                {
+                    "name": "Buffered",
+                    "rule_type": "spatial",
+                    "definition": self.definition(geometry=self.POINT, buffer=500),
+                }
+            ),
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["definition"]["buffer"], 500)
 
 
 class SpatialApiTests(SpatialTestCase):

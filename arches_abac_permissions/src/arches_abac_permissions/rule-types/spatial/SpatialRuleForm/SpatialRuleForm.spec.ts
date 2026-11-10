@@ -8,18 +8,21 @@ import type { VueWrapper } from "@vue/test-utils";
 import type { SpatialDefinition } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const api = vi.hoisted(() => ({
-    fetchMapConfig: vi.fn(),
     fetchGeometryNodes: vi.fn(),
     fetchResourceModels: vi.fn(),
 }));
 const toastAdd = vi.hoisted(() => vi.fn());
 
 vi.mock("@/arches_abac_permissions/rule-types/spatial/api.ts", () => api);
+vi.mock(
+    "@/arches_abac_permissions/rule-types/spatial/SpatialRuleForm/components/AreaMap/AreaMap.vue",
+    () => ({ default: { name: "AreaMap", template: "<div />" } }),
+);
 vi.mock("openvue/usetoast", () => ({ useToast: () => ({ add: toastAdd }) }));
 
 const AreaMapStub = {
     name: "AreaMap",
-    props: ["modelValue", "config", "describedBy"],
+    props: ["modelValue", "buffer", "describedBy"],
     template: "<div class='area-map-stub' />",
 };
 
@@ -29,8 +32,10 @@ const stubs = {
         props: ["label"],
         template: "<button type='button'>{{ label }}</button>",
     },
-    Message: { template: "<div role='alert'><slot /></div>" },
-    ProgressSpinner: true,
+    Message: {
+        props: ["pt"],
+        template: "<div role='alert' v-bind='pt?.root'><slot /></div>",
+    },
     Select: true,
     Textarea: {
         props: ["modelValue"],
@@ -81,18 +86,10 @@ describe("SpatialRuleForm", () => {
         api.fetchResourceModels.mockResolvedValue([
             { graphid: "g", name: "Places" },
         ]);
-        api.fetchMapConfig.mockResolvedValue({
-            basemap: null,
-            bounds: null,
-            min_zoom: 0,
-            max_zoom: 20,
-            sprite: "",
-            glyphs: "",
-        });
         api.fetchGeometryNodes.mockResolvedValue([]);
     });
 
-    it("loads models, geometry nodes and the map", async () => {
+    it("loads models and geometry nodes", async () => {
         const wrapper = mountForm({ graphid: "g" });
         await flushPromises();
         expect(api.fetchResourceModels).toHaveBeenCalled();
@@ -126,7 +123,7 @@ describe("SpatialRuleForm", () => {
             .findAll("button")
             .find((button) => button.text().includes("Apply GeoJSON"))!;
 
-        await textarea.setValue('{"type": "Point", "coordinates": [0, 0]}');
+        await textarea.setValue('{"type": "Circle", "coordinates": [0, 0]}');
         await apply.trigger("click");
         expect(wrapper.find("[role='alert']").exists()).toBe(true);
         expect(textarea.attributes("aria-describedby")).toBe(
@@ -141,11 +138,131 @@ describe("SpatialRuleForm", () => {
         wrapper.unmount();
     });
 
+    it("stores the map's buffer and passes it back", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        const map = wrapper.findComponent(AreaMapStub);
+        map.vm.$emit("update:buffer", 250);
+        await flushPromises();
+        expect(lastDefinition(wrapper).buffer).toBe(250);
+        expect(map.props("buffer")).toBe(250);
+        map.vm.$emit("update:buffer", 0);
+        await flushPromises();
+        expect("buffer" in lastDefinition(wrapper)).toBe(false);
+        wrapper.unmount();
+    });
+
+    it("explains that points and lines need a buffer", async () => {
+        const point = { type: "Point", coordinates: [1, 2] } as const;
+        const wrapper = mountForm({
+            graphid: "g",
+            nodeid: "n",
+            geometry: point,
+        });
+        await flushPromises();
+        const warning = wrapper.find("#abac-area-buffer-warning");
+        expect(warning.text()).toBe(
+            "Points and lines need a buffer greater than 0.",
+        );
+        expect(warning.attributes("role")).toBe("status");
+        expect(warning.attributes("aria-live")).toBe("polite");
+        expect(wrapper.findComponent(AreaMapStub).props("describedBy")).toBe(
+            "abac-area-help abac-area-buffer-warning",
+        );
+
+        wrapper.findComponent(AreaMapStub).vm.$emit("update:buffer", 100);
+        await flushPromises();
+        expect(wrapper.find("#abac-area-buffer-warning").exists()).toBe(false);
+        expect(wrapper.findComponent(AreaMapStub).props("describedBy")).toBe(
+            "abac-area-help",
+        );
+        wrapper.unmount();
+    });
+
+    it("doesn't ask polygons for a buffer", async () => {
+        const wrapper = mountForm({
+            graphid: "g",
+            nodeid: "n",
+            geometry: square,
+        });
+        await flushPromises();
+        expect(wrapper.find("#abac-area-buffer-warning").exists()).toBe(false);
+        wrapper.unmount();
+    });
+
+    it("shows the area as a FeatureCollection and copies it", async () => {
+        const writeText = vi.fn().mockResolvedValue(undefined);
+        Object.assign(navigator, { clipboard: { writeText } });
+        const wrapper = mountForm({
+            graphid: "g",
+            nodeid: "n",
+            geometry: square,
+        });
+        await flushPromises();
+        wrapper.find("details").element.setAttribute("open", "");
+        await wrapper.find("details").trigger("toggle");
+        const text = (
+            wrapper.find("#abac-area-geojson").element as HTMLTextAreaElement
+        ).value;
+        expect(JSON.parse(text)).toEqual({
+            type: "FeatureCollection",
+            features: [{ type: "Feature", properties: {}, geometry: square }],
+        });
+
+        const copy = wrapper
+            .findAll("button")
+            .find((button) => button.text().includes("Copy GeoJSON"))!;
+        await copy.trigger("click");
+        await flushPromises();
+        expect(JSON.parse(writeText.mock.calls[0][0]).type).toBe(
+            "FeatureCollection",
+        );
+        expect(toastAdd).toHaveBeenCalledWith(
+            expect.objectContaining({ severity: "success" }),
+        );
+
+        writeText.mockRejectedValue(new Error("denied"));
+        await copy.trigger("click");
+        await flushPromises();
+        expect(toastAdd).toHaveBeenLastCalledWith(
+            expect.objectContaining({ severity: "error", detail: "denied" }),
+        );
+        wrapper.unmount();
+    });
+
+    it("disables copying when there is no area", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        const copy = wrapper
+            .findAll("button")
+            .find((button) => button.text().includes("Copy GeoJSON"))!;
+        expect(copy.attributes("disabled")).toBeDefined();
+        wrapper.unmount();
+    });
+
+    it("applies point and line GeoJSON", async () => {
+        const wrapper = mountForm({ graphid: "g", nodeid: "n" });
+        await flushPromises();
+        await wrapper
+            .find("#abac-area-geojson")
+            .setValue('{"type": "Point", "coordinates": [0, 0]}');
+        await wrapper
+            .findAll("button")
+            .find((button) => button.text().includes("Apply GeoJSON"))!
+            .trigger("click");
+        expect(lastDefinition(wrapper).geometry).toEqual({
+            type: "GeometryCollection",
+            geometries: [{ type: "Point", coordinates: [0, 0] }],
+        });
+        wrapper.unmount();
+    });
+
     it("keeps the area and operator but drops the node when the model changes", async () => {
         const wrapper = mountForm({
             graphid: "g",
             nodeid: "n",
             geometry: square,
+            buffer: 10,
             operator: "within",
         });
         await flushPromises();
@@ -157,6 +274,7 @@ describe("SpatialRuleForm", () => {
         expect(lastDefinition(wrapper)).toEqual({
             graphid: "other",
             geometry: square,
+            buffer: 10,
             operator: "within",
         });
         wrapper.unmount();
@@ -179,15 +297,6 @@ describe("SpatialRuleForm", () => {
             operator: "centroid",
         });
         expect(wrapper.find("#abac-area-help").text()).toContain("centre");
-        wrapper.unmount();
-    });
-
-    it("shows an error when the map can't load", async () => {
-        api.fetchMapConfig.mockRejectedValue(new Error("Map unavailable"));
-        const wrapper = mountForm({});
-        await flushPromises();
-        expect(wrapper.findComponent(AreaMapStub).exists()).toBe(false);
-        expect(wrapper.text()).toContain("Map unavailable");
         wrapper.unmount();
     });
 });
