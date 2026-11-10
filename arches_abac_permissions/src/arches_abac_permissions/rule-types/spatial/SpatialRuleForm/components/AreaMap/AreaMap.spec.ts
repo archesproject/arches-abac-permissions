@@ -197,12 +197,14 @@ describe("AreaMap", () => {
     it("adopts a buffer edited in the map tools for every shape", async () => {
         const { wrapper } = mountMap({ modelValue: square });
         const map = wrapper.findComponent({ name: "MapComponent" });
+        const initialId = (map.props("value") as { features: { id: string }[] })
+            .features[0].id;
         const other = feature(point, 0, "b");
-        const edited = feature(square, 2, "a", "kilometers");
+        const edited = feature(square, 2, initialId, "kilometers");
         context.drawnFeatures.value = [edited, other];
         await map.vm.$emit("update:value", {
             type: "FeatureCollection",
-            features: [feature(square, 0, "a")],
+            features: [feature(square, 0, initialId)],
         });
         expect(wrapper.emitted("update:buffer")).toBeUndefined();
         await map.vm.$emit("update:value", {
@@ -238,5 +240,42 @@ describe("AreaMap", () => {
             30,
             "meters",
         );
+    });
+
+    it.each([
+        ["polygon", square],
+        ["point", point],
+    ])(
+        "adopts removal of a loaded buffer on a %s before any other map event",
+        async (_, geometry) => {
+            const { wrapper } = mountMap({
+                modelValue: geometry,
+                buffer: 1000,
+            });
+            const map = wrapper.findComponent({ name: "MapComponent" });
+            const initialId = (
+                map.props("value") as { features: { id: string }[] }
+            ).features[0].id;
+            await map.vm.$emit("update:value", {
+                type: "FeatureCollection",
+                features: [feature(geometry, 0, initialId)],
+            });
+            expect(wrapper.emitted("update:buffer")).toEqual([[0]]);
+        },
+    );
+
+    it("adopts a buffer switched off and on again", async () => {
+        const { wrapper } = mountMap({ modelValue: point, buffer: 1000 });
+        const map = wrapper.findComponent({ name: "MapComponent" });
+        const initialId = (map.props("value") as { features: { id: string }[] })
+            .features[0].id;
+        for (const distance of [0, 1000]) {
+            await map.vm.$emit("update:value", {
+                type: "FeatureCollection",
+                features: [feature(point, distance, initialId)],
+            });
+            await wrapper.setProps({ buffer: distance || undefined });
+        }
+        expect(wrapper.emitted("update:buffer")).toEqual([[0], [1000]]);
     });
 });

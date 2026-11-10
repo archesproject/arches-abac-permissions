@@ -32,7 +32,10 @@ const stubs = {
         props: ["label"],
         template: "<button type='button'>{{ label }}</button>",
     },
-    Message: { template: "<div role='alert'><slot /></div>" },
+    Message: {
+        props: ["pt"],
+        template: "<div role='alert' v-bind='pt?.root'><slot /></div>",
+    },
     Select: true,
     Textarea: {
         props: ["modelValue"],
@@ -146,6 +149,44 @@ describe("SpatialRuleForm", () => {
         map.vm.$emit("update:buffer", 0);
         await flushPromises();
         expect("buffer" in lastDefinition(wrapper)).toBe(false);
+        wrapper.unmount();
+    });
+
+    it("explains that points and lines need a buffer", async () => {
+        const point = { type: "Point", coordinates: [1, 2] } as const;
+        const wrapper = mountForm({
+            graphid: "g",
+            nodeid: "n",
+            geometry: point,
+        });
+        await flushPromises();
+        const warning = wrapper.find("#abac-area-buffer-warning");
+        expect(warning.text()).toBe(
+            "Points and lines need a buffer greater than 0.",
+        );
+        expect(warning.attributes("role")).toBe("status");
+        expect(warning.attributes("aria-live")).toBe("polite");
+        expect(wrapper.findComponent(AreaMapStub).props("describedBy")).toBe(
+            "abac-area-help abac-area-buffer-warning",
+        );
+
+        wrapper.findComponent(AreaMapStub).vm.$emit("update:buffer", 100);
+        await flushPromises();
+        expect(wrapper.find("#abac-area-buffer-warning").exists()).toBe(false);
+        expect(wrapper.findComponent(AreaMapStub).props("describedBy")).toBe(
+            "abac-area-help",
+        );
+        wrapper.unmount();
+    });
+
+    it("doesn't ask polygons for a buffer", async () => {
+        const wrapper = mountForm({
+            graphid: "g",
+            nodeid: "n",
+            geometry: square,
+        });
+        await flushPromises();
+        expect(wrapper.find("#abac-area-buffer-warning").exists()).toBe(false);
         wrapper.unmount();
     });
 

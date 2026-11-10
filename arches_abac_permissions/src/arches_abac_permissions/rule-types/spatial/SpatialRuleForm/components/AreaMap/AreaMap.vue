@@ -49,7 +49,10 @@ const mapRef = useTemplateRef<InstanceType<typeof MapComponent>>("map");
 // The definition holds one buffer; whichever shape's buffer the user edits in
 // the map tools becomes the buffer for every shape.
 const bufferDistance = ref(props.buffer ?? 0);
+// Features we hand to the map get ids here, so edits to them are recognised
+// even though the map doesn't emit for its initial value.
 const knownFeatureIds = new Set<string>();
+let nextFeatureId = 0;
 
 // Only the initial value is read by the map; later changes go through
 // syncMap and update:value.
@@ -87,6 +90,8 @@ function areaKey(geometry: AreaGeometry | undefined): string {
 
 function withBuffer(collection: FeatureCollection): FeatureCollection {
     for (const feature of collection.features) {
+        feature.id = `abac-${nextFeatureId++}`;
+        knownFeatureIds.add(String(feature.id));
         feature.properties = {
             ...feature.properties,
             buffer_distance: bufferDistance.value,

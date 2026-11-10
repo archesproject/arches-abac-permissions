@@ -3,6 +3,7 @@ import { computed, ref, watchEffect } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import Button from "openvue/button";
+import Message from "openvue/message";
 import Select from "openvue/select";
 import Textarea from "openvue/textarea";
 import { useToast } from "openvue/usetoast";
@@ -18,6 +19,7 @@ import {
     fetchResourceModels,
 } from "@/arches_abac_permissions/rule-types/spatial/api.ts";
 import {
+    needsBuffer,
     parseArea,
     toFeatureCollection,
 } from "@/arches_abac_permissions/rule-types/spatial/geometry.ts";
@@ -32,6 +34,7 @@ import type {
 } from "@/arches_abac_permissions/rule-types/spatial/types";
 
 const AREA_HELP_ID = "abac-area-help";
+const BUFFER_WARNING_ID = "abac-area-buffer-warning";
 const GEOJSON_ERROR_ID = "abac-area-geojson-error";
 const MAX_BUFFER = 100000;
 const DEFAULT_OPERATOR: SpatialOperator = "intersects";
@@ -100,6 +103,13 @@ const area = computed({
         definition.value = { ...definition.value, geometry };
     },
 });
+
+const bufferMissing = computed(
+    () => needsBuffer(area.value) && !((definition.value.buffer ?? 0) > 0),
+);
+const areaDescribedBy = computed(() =>
+    bufferMissing.value ? `${AREA_HELP_ID} ${BUFFER_WARNING_ID}` : AREA_HELP_ID,
+);
 
 watchEffect(loadResourceModels);
 watchEffect(loadNodes);
@@ -280,9 +290,22 @@ function applyGeoJson(): void {
         <AreaMap
             v-model="area"
             :buffer="definition.buffer"
-            :described-by="AREA_HELP_ID"
+            :described-by="areaDescribedBy"
             @update:buffer="onBufferChange"
         />
+        <Message
+            v-if="bufferMissing"
+            severity="warn"
+            :pt="{
+                root: {
+                    id: BUFFER_WARNING_ID,
+                    role: 'status',
+                    'aria-live': 'polite',
+                },
+            }"
+        >
+            {{ $gettext("Points and lines need a buffer greater than 0.") }}
+        </Message>
         <details
             class="geojson"
             @toggle="onGeoJsonToggle"
