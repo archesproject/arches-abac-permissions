@@ -145,7 +145,7 @@ Things to be aware of:
 | `resource_set_rule.py` | `ResourceSetRule` | The members of an [arches-resource-sets](https://github.com/archesproject/arches-resource-sets) resource set |
 | `tile_node_value_rule.py` | `TileNodeValueRule` | Resources of a graph with a tile whose node holds a given value |
 | `spatial_rule.py` | `SpatialRule` | Resources of a graph whose geometry in a given node intersects, lies within, or has its centre in an area |
-| `search_rule.py` | `SearchRule` | Not yet evaluated; stores a saved search query |
+| `search_rule.py` | `SearchRule` | Resources an arches-search advanced search query matches. Needs arches-search |
 | `queryset_rule.py` | `QuerySetRule` | Not yet evaluated |
 
 ## Creating a lifecycle state rule
@@ -322,6 +322,30 @@ Things to be aware of:
 - **The area is a GeoJSON `Polygon` or `MultiPolygon` in longitude/latitude (WGS 84).** Only `type` and `coordinates` are kept, so any `crs` is dropped. It may have at most 10,000 vertices and be at most 180° of longitude wide; areas crossing the antimeridian aren't supported. Overlapping polygons are merged.
 - Nodes of draft resource models can't be used; publish the model first.
 - **Deleting the node or the resource model breaks the rule.** It then matches nothing, and an error is logged each time it's evaluated.
+
+## Creating a search rule
+
+A search rule matches whatever an [arches-search](https://github.com/archesproject/arches-search) advanced search matches. Install arches-search alongside this package (`pip install "arches-abac-permissions[arches-search]"`) and add it to `INSTALLED_APPS` as its README describes.
+
+1. Build the search in arches-search's advanced search, and copy its query (the JSON for one resource model, with `graph_slug`, `logic`, `clauses` and `groups`).
+2. In the admin, add an inclusion rule with `modulename` `search_rule.py`, `classname` `SearchRule`, and the query as the definition:
+
+    ```json
+    {"advanced_search_query": {"graph_slug": "monument", "scope": "RESOURCE", "logic": "AND", "clauses": [...], "groups": [], "aggregations": [], "relationship": null}}
+    ```
+
+3. Grant permissions to a group, as for any rule.
+
+Saving the rule checks that arches-search can compile the query, so a mistake (an unknown node, an operator the node's datatype doesn't support) is reported in the admin. Nothing compiled is stored: the query is compiled each time the rule is evaluated. When abac filters a list of resources (as arches-search does), the rule runs as part of that same database query; checking a single resource runs a separate small query for each search rule.
+
+Things to be aware of:
+
+- **The rule is a copy.** It doesn't follow a saved search, so editing or deleting the search doesn't change the rule. Saving a rule makes the search's criteria visible to everyone who can see rules.
+- **Graph changes apply straight away**, because the query is compiled when used. If it can no longer be compiled (for example, a node it uses was removed), the rule matches nothing and logs an error until it's fixed.
+- **Queries can't use "is me" or "is not me".** A rule doesn't run as any one user.
+- **A query needs at least one clause.** An empty query would otherwise match every resource of its graph.
+- **Queries are compiled in the site's default language (`LANGUAGE_CODE`).** Some arches-search lookups, such as a resource's name, depend on the language, and a rule must match the same resources for every user.
+- Rules created in code aren't checked unless `full_clean()` (or `clean()`) is called before saving. An invalid one matches nothing and logs an error.
 
 ## Indexes for rules
 

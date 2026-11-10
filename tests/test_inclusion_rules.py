@@ -54,17 +54,6 @@ class InclusionRuleTests(TestCase):
         self.assertIs(search.get_class_module(), SearchRule)
         self.assertIs(queryset.get_class_module(), QuerySetRule)
 
-    def test_search_rule_url(self):
-        rule = make_rule(
-            modulename="search_rule.py",
-            classname="SearchRule",
-            definition={"paging-filter": 1, "term-filter": [{"inverted": False}]},
-        )
-        url = rule.get_search_rule_url()
-        self.assertTrue(url.startswith("/search?"))
-        self.assertIn("paging-filter=1", url)
-        self.assertIn("term-filter=%5B%7B%22inverted%22%3A%20false%7D%5D", url)
-
     def test_queryset_rule_url_is_false(self):
         rule = make_rule(modulename="queryset_rule.py", classname="QuerySetRule")
         self.assertIs(rule.get_search_rule_url(), False)
@@ -345,7 +334,7 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
 
     def test_filter_resource_queryset_ignores_unevaluated_rules(self):
         self.grant(
-            make_rule(modulename="search_rule.py", classname="SearchRule"),
+            make_rule(modulename="queryset_rule.py", classname="QuerySetRule"),
             "view_resourceinstance",
         )
         filtered = self.framework.filter_resource_queryset(
@@ -425,7 +414,7 @@ class InclusionRuleValidationTests(LifecycleTestCase):
         self.make_lifecycle_rule().clean()
 
     def test_rule_class_without_definition_checks(self):
-        make_rule(modulename="search_rule.py", classname="SearchRule").clean()
+        make_rule(modulename="no_checks_rule.py", classname="NoChecksRule").clean()
 
     def test_missing_rule_class(self):
         self.assertInvalid(make_rule(), None)
