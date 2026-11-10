@@ -1,8 +1,9 @@
 import uuid
+from unittest import mock
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import DatabaseError, IntegrityError, transaction
 from django.test import TestCase
 
 from arches.app.models.models import (
@@ -86,7 +87,6 @@ class LifecycleTestCase(TestCase):
             name="Branch", slug="branch", isresource=False
         )
         cls.nodegroup = NodeGroup.objects.create()
-        # Reading a resource requires read_nodegroup on a node of its graph.
         Node.objects.create(
             name="Name",
             datatype="string",
@@ -353,7 +353,6 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
         )
         self.assertEqual(set(filtered), {self.matching, self.also_matching})
 
-    # A rule that cannot be evaluated matches nothing and breaks nothing.
     framework_logger = (
         "arches_abac_permissions.permissions.arches_abac_permission_framework"
     )
@@ -386,6 +385,33 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
                         self.user, ResourceInstance.objects.filter(graph=self.graph)
                     )
                 self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+    def test_broken_rule_logs_error_once_per_kind_of_failure(self):
+        with mock.patch.object(LifecycleStateRule, "matches_resource") as matches:
+            with self.assertLogs(self.framework_logger, "WARNING") as logs:
+                for error in (ValueError, ValueError, KeyError, KeyError):
+                    matches.side_effect = error
+                    self.framework.get_perms(self.user, self.matching)
+        self.assertEqual(
+            [record.levelname for record in logs.records],
+            ["ERROR", "WARNING", "ERROR", "WARNING"],
+        )
+
+    def test_get_perms_raises_database_error(self):
+        with mock.patch.object(
+            LifecycleStateRule, "matches_resource", side_effect=DatabaseError
+        ):
+            with self.assertRaises(DatabaseError):
+                self.framework.get_perms(self.user, self.matching)
+
+    def test_filter_resource_queryset_raises_database_error(self):
+        with mock.patch.object(
+            LifecycleStateRule, "get_matching_resources", side_effect=DatabaseError
+        ):
+            with self.assertRaises(DatabaseError):
+                self.framework.filter_resource_queryset(
+                    self.user, ResourceInstance.objects.filter(graph=self.graph)
+                )
 
 
 class InclusionRuleValidationTests(LifecycleTestCase):

@@ -46,6 +46,10 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
     filtered by rules.
     """
 
+    def __init__(self):
+        super().__init__()
+        self.reported_failures = set()
+
     def get_groups(self, user_or_group: User | Group | None):
         if isinstance(user_or_group, Group):
             return [user_or_group]
@@ -59,8 +63,17 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
             return evaluate(rule)
         except DatabaseError:
             raise
-        except Exception:
-            logger.exception(
+        except Exception as e:
+            # The framework lives for the whole process and a broken rule fails
+            # on every check, so log the trace once per rule and kind of error.
+            failure = (rule.pk, type(e))
+            log = (
+                logger.warning
+                if failure in self.reported_failures
+                else logger.exception
+            )
+            self.reported_failures.add(failure)
+            log(
                 "Inclusion rule %s (%s) could not be evaluated and is being "
                 "treated as matching nothing.",
                 rule.pk,

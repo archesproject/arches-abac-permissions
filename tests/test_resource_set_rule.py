@@ -131,7 +131,7 @@ class ResourceSetRuleTests(LifecycleTestCase):
             self.assertFalse(
                 framework.user_can_read_resource(user, resource=self.matching)
             )
-        with self.assertLogs(FRAMEWORK_LOGGER, "ERROR"):
+        with self.assertLogs(FRAMEWORK_LOGGER, "WARNING"):
             filtered = framework.filter_resource_queryset(
                 user, ResourceInstance.objects.filter(graph=self.graph)
             )
