@@ -11,6 +11,7 @@ from arches.app.models.models import (
     ResourceInstanceLifecycleState,
 )
 from arches_abac_permissions.models import InclusionRule
+from arches_abac_permissions.rule_cache import get_cached
 from arches_abac_permissions.rule_types import RuleType
 
 
@@ -47,14 +48,14 @@ class LifecycleStateRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        graph, state = cls.parse_definition(inclusion_rule.definition)
+        graph, state = get_cached(inclusion_rule, cls.parse_definition)
         return ResourceInstance.objects.filter(
             graph=graph, resource_instance_lifecycle_state=state
         )
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        graph, state = cls.parse_definition(inclusion_rule.definition)
+        graph, state = get_cached(inclusion_rule, cls.parse_definition)
         return (
             resource.graph_id == graph.pk
             and resource.resource_instance_lifecycle_state_id == state.pk

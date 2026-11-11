@@ -17,6 +17,7 @@ from arches.app.models.models import (
     ResourceInstance,
 )
 from arches_abac_permissions.models import InclusionRule
+from arches_abac_permissions.rule_cache import get_cached
 from arches_abac_permissions.rule_types import RuleType
 
 GEOMETRY_DATATYPE = "geojson-feature-collection"
@@ -91,7 +92,7 @@ class SpatialRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        node, area, operator = cls.parse_definition(inclusion_rule.definition)
+        node, area, operator = get_cached(inclusion_rule, cls.parse_definition)
         return ResourceInstance.objects.filter(
             pk__in=cls.matching_geometries(node, area, operator).values(
                 "resourceinstance_id"
@@ -100,7 +101,7 @@ class SpatialRule(InclusionRule):
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        node, area, operator = cls.parse_definition(inclusion_rule.definition)
+        node, area, operator = get_cached(inclusion_rule, cls.parse_definition)
         if resource.graph_id != node.graph_id:
             return False
         return (

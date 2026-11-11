@@ -15,6 +15,7 @@ from arches.app.models.models import (
     TileModel,
 )
 from arches_abac_permissions.models import InclusionRule
+from arches_abac_permissions.rule_cache import get_cached
 from arches_abac_permissions.rule_types import RuleType
 
 CONTROLLED_LISTS_INSTALLED = apps.is_installed("arches.extensions.controlled_lists")
@@ -81,7 +82,7 @@ class TileNodeValueRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        node, value_filter = cls.get_tile_filter(inclusion_rule.definition)
+        node, value_filter = get_cached(inclusion_rule, cls.get_tile_filter)
         tiles = TileModel.objects.filter(
             value_filter,
             nodegroup_id=node.nodegroup_id,
@@ -93,7 +94,7 @@ class TileNodeValueRule(InclusionRule):
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        node, value_filter = cls.get_tile_filter(inclusion_rule.definition)
+        node, value_filter = get_cached(inclusion_rule, cls.get_tile_filter)
         if resource.graph_id != node.graph_id:
             return False
         return TileModel.objects.filter(
