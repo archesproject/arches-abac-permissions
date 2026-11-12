@@ -129,7 +129,7 @@ An inclusion rule has:
 
 When Arches checks a user's permissions on a single resource instance (viewing its report, opening it in the editor, deleting it), the framework adds the permissions from every rule that is assigned to one of the user's groups and that matches the resource.
 
-Parsed rule definitions (graph, node, lifecycle state, languages) are cached for the duration of one Django request or one Celery task, so repeated permission checks don't re-query them. Management commands and scripts can opt in by wrapping checks in `with rule_definition_cache():` (from `arches_abac_permissions.rule_cache`). Outside these scopes nothing is cached, and saving a rule always validates against the database.
+Parsed *Resource has Node Value* rule definitions (node, languages) are cached for the duration of one Django request or one Celery task, so repeated permission checks don't re-query them. Management commands and scripts can opt in by wrapping checks in `with rule_definition_cache():` (from `arches_abac_permissions.rule_cache`). Outside these scopes nothing is cached, and saving a rule always validates against the database.
 
 Things to be aware of:
 

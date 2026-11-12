@@ -199,7 +199,7 @@ class LifecycleStateRuleTests(LifecycleTestCase):
                     definition=definition,
                 )
                 with self.assertRaises(ValidationError):
-                    LifecycleStateRule.get_matching_resources(rule)
+                    LifecycleStateRule.validate_definition(rule)
 
 
 class InclusionRuleGroupPermissionTests(TestCase):
@@ -360,11 +360,6 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
     def broken_rules(self):
         return [
             make_rule(modulename="lifecycle_state_rule.py", classname="Missing"),
-            make_rule(
-                modulename="lifecycle_state_rule.py",
-                classname="LifecycleStateRule",
-                definition={},
-            ),
         ]
 
     def test_get_perms_ignores_broken_rule(self):

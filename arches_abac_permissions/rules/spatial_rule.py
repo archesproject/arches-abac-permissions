@@ -1,5 +1,6 @@
 import json
 import math
+import uuid
 from functools import lru_cache
 
 from django.contrib.gis.db.models.functions import Centroid
@@ -12,12 +13,10 @@ from django.utils.translation import gettext_lazy
 
 from arches.app.models.models import (
     GeoJSONGeometry,
-    GraphModel,
-    Node,
     ResourceInstance,
 )
 from arches_abac_permissions.models import InclusionRule
-from arches_abac_permissions.rule_cache import get_cached
+from arches_abac_permissions.rules.utils import get_resource_node
 from arches_abac_permissions.rule_types import RuleType
 
 GEOMETRY_DATATYPE = "geojson-feature-collection"
@@ -92,26 +91,26 @@ class SpatialRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        node, area, operator = get_cached(inclusion_rule, cls.parse_definition)
+        _graph_id, node_id, area, operator = cls.get_args(inclusion_rule.definition)
         return ResourceInstance.objects.filter(
-            pk__in=cls.matching_geometries(node, area, operator).values(
+            pk__in=cls.matching_geometries(node_id, area, operator).values(
                 "resourceinstance_id"
             )
         )
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        node, area, operator = get_cached(inclusion_rule, cls.parse_definition)
-        if resource.graph_id != node.graph_id:
+        graph_id, node_id, area, operator = cls.get_args(inclusion_rule.definition)
+        if resource.graph_id != graph_id:
             return False
         return (
-            cls.matching_geometries(node, area, operator)
+            cls.matching_geometries(node_id, area, operator)
             .filter(resourceinstance=resource)
             .exists()
         )
 
     @staticmethod
-    def matching_geometries(node, area, operator):
+    def matching_geometries(node_id, area, operator):
         """
         Return the node's geometries whose resources match. Each operator
         prefilters with a lookup the GiST index can use.
@@ -120,15 +119,17 @@ class SpatialRule(InclusionRule):
             # A centroid can lie outside its geometry, but never outside its
             # bounding box.
             return (
-                GeoJSONGeometry.objects.filter(node=node, geom__bboverlaps=area)
+                GeoJSONGeometry.objects.filter(node_id=node_id, geom__bboverlaps=area)
                 .annotate(centroid=Centroid("geom"))
                 .filter(centroid__intersects=area)
             )
-        geometries = GeoJSONGeometry.objects.filter(node=node, geom__intersects=area)
+        geometries = GeoJSONGeometry.objects.filter(
+            node_id=node_id, geom__intersects=area
+        )
         if operator == WITHIN:
             # Every geometry of the resource in the node must be in the area.
             outside = GeoJSONGeometry.objects.filter(
-                node=node,
+                node_id=node_id,
                 resourceinstance_id__in=geometries.values("resourceinstance_id"),
             ).exclude(geom__within=area)
             return geometries.exclude(
@@ -151,8 +152,8 @@ class SpatialRule(InclusionRule):
         )
 
     @classmethod
-    def parse_definition(cls, definition):
-        """Return the geometry node, the area as a GEOSGeometry and the operator."""
+    def get_args(cls, definition):
+        """Return the graph id, node id, area and operator without database access."""
         graphid = definition.get("graphid")
         nodeid = definition.get("nodeid")
         geometry = definition.get("geometry")
@@ -166,37 +167,27 @@ class SpatialRule(InclusionRule):
                 _("The operator must be one of %s.") % ", ".join(OPERATORS)
             )
         try:
-            # Draft graphs (source_identifier set) are replaced when published.
-            node = Node.objects.get(
-                pk=nodeid,
-                graph_id=graphid,
-                graph__isresource=True,
-                graph__source_identifier=None,
-            )
-        except (Node.DoesNotExist, ValidationError):
-            node = None
-        if node is None:
-            try:
-                is_graph = GraphModel.objects.filter(
-                    pk=graphid, isresource=True, source_identifier=None
-                ).exists()
-            except ValidationError:
-                is_graph = False
-            if not is_graph:
-                raise ValidationError(
-                    _("%s is not the id of a resource model.") % graphid
-                )
+            graph_id = uuid.UUID(str(graphid))
+        except ValueError:
+            raise ValidationError(_("%s is not the id of a resource model.") % graphid)
+        try:
+            node_id = uuid.UUID(str(nodeid))
+        except ValueError:
             raise ValidationError(
                 _("%(nodeid)s is not the id of a node of graph %(graphid)s.")
                 % {"nodeid": nodeid, "graphid": graphid}
             )
+        area = cls.parse_geometry(geometry, definition.get("buffer"))
+        return graph_id, node_id, area, operator
+
+    @classmethod
+    def parse_definition(cls, definition):
+        """Return the DB-validated geometry node, the area and the operator."""
+        graph_id, node_id, area, operator = cls.get_args(definition)
+        node = get_resource_node(graph_id, node_id)
         if node.datatype != GEOMETRY_DATATYPE:
             raise ValidationError(_("The node must be a geometry node."))
-        return (
-            node,
-            cls.parse_geometry(geometry, definition.get("buffer")),
-            operator,
-        )
+        return node, area, operator
 
     @staticmethod
     def parse_geometry(geometry, buffer=None):

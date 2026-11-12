@@ -8,7 +8,6 @@ from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
 from arches.app.models.models import (
-    GraphModel,
     Language,
     Node,
     ResourceInstance,
@@ -17,6 +16,7 @@ from arches.app.models.models import (
 from arches_abac_permissions.models import InclusionRule
 from arches_abac_permissions.rule_cache import get_cached
 from arches_abac_permissions.rule_types import RuleType
+from arches_abac_permissions.rules.utils import get_resource_node
 
 CONTROLLED_LISTS_INSTALLED = apps.is_installed("arches.extensions.controlled_lists")
 if CONTROLLED_LISTS_INSTALLED:
@@ -173,20 +173,7 @@ class TileNodeValueRule(InclusionRule):
                     "Tile node value rules require a 'graphid', a 'nodeid' and a 'value'."
                 )
             )
-        try:
-            # Draft graphs (source_identifier set) are replaced when published.
-            graph = GraphModel.objects.get(
-                pk=graphid, isresource=True, source_identifier=None
-            )
-        except (GraphModel.DoesNotExist, ValidationError):
-            raise ValidationError(_("%s is not the id of a resource model.") % graphid)
-        try:
-            node = Node.objects.get(pk=nodeid, graph=graph)
-        except (Node.DoesNotExist, ValidationError):
-            raise ValidationError(
-                _("%(nodeid)s is not the id of a node of graph %(graphid)s.")
-                % {"nodeid": nodeid, "graphid": graphid}
-            )
+        node = get_resource_node(graphid, nodeid)
         if node.datatype not in get_supported_datatypes():
             raise ValidationError(
                 _("Nodes of datatype %s are not supported.") % node.datatype

@@ -1,4 +1,5 @@
 import json
+import uuid
 from urllib.parse import quote, urlencode
 
 from django.core.exceptions import ValidationError
@@ -11,7 +12,6 @@ from arches.app.models.models import (
     ResourceInstanceLifecycleState,
 )
 from arches_abac_permissions.models import InclusionRule
-from arches_abac_permissions.rule_cache import get_cached
 from arches_abac_permissions.rule_types import RuleType
 
 
@@ -36,10 +36,10 @@ class LifecycleStateRule(InclusionRule):
 
     @classmethod
     def get_search_rule_url(cls, inclusion_rule):
-        graph, state = cls.parse_definition(inclusion_rule.definition)
+        graph_id, state_id = cls.require_ids(inclusion_rule.definition)
         filters = {
-            "resource-type-filter": [{"graphid": str(graph.pk), "inverted": False}],
-            "lifecycle-state-filter": [{"id": str(state.pk), "inverted": False}],
+            "resource-type-filter": [{"graphid": str(graph_id), "inverted": False}],
+            "lifecycle-state-filter": [{"id": str(state_id), "inverted": False}],
         }
         query = urlencode(
             {k: json.dumps(v) for k, v in filters.items()}, quote_via=quote
@@ -48,22 +48,42 @@ class LifecycleStateRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        graph, state = get_cached(inclusion_rule, cls.parse_definition)
+        ids = cls.get_ids(inclusion_rule.definition)
+        if ids is None:
+            return ResourceInstance.objects.none()
+        graph_id, state_id = ids
         return ResourceInstance.objects.filter(
-            graph=graph, resource_instance_lifecycle_state=state
+            graph_id=graph_id, resource_instance_lifecycle_state_id=state_id
         )
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        graph, state = get_cached(inclusion_rule, cls.parse_definition)
-        return (
-            resource.graph_id == graph.pk
-            and resource.resource_instance_lifecycle_state_id == state.pk
+        ids = cls.get_ids(inclusion_rule.definition)
+        return ids is not None and ids == (
+            resource.graph_id,
+            resource.resource_instance_lifecycle_state_id,
         )
 
     @classmethod
     def validate_definition(cls, inclusion_rule):
-        cls.parse_definition(inclusion_rule.definition)
+        graph_id, state_id = cls.require_ids(inclusion_rule.definition)
+        try:
+            graph = GraphModel.objects.get(pk=graph_id, isresource=True)
+        except GraphModel.DoesNotExist:
+            raise ValidationError(
+                gettext_lazy("%(graphid)s is not the id of a resource model.")
+                % {"graphid": graph_id}
+            )
+        if not ResourceInstanceLifecycleState.objects.filter(
+            pk=state_id,
+            resource_instance_lifecycle_id=graph.resource_instance_lifecycle_id,
+        ).exists():
+            raise ValidationError(
+                gettext_lazy(
+                    "%(stateid)s is not the id of a lifecycle state of graph %(graphid)s."
+                )
+                % {"stateid": state_id, "graphid": graph_id}
+            )
 
     @classmethod
     def get_index_sql(cls, inclusion_rule):
@@ -74,36 +94,27 @@ class LifecycleStateRule(InclusionRule):
         )
 
     @staticmethod
-    def parse_definition(definition):
-        graphid = definition.get("graphid")
-        stateid = definition.get("lifecycle_state_id")
-        if not graphid or not stateid:
+    def get_ids(definition):
+        """Return the graph and state UUIDs without touching the database."""
+        try:
+            return (
+                uuid.UUID(str(definition["graphid"])),
+                uuid.UUID(str(definition["lifecycle_state_id"])),
+            )
+        except (KeyError, ValueError):
+            return None
+
+    @classmethod
+    def require_ids(cls, definition):
+        ids = cls.get_ids(definition)
+        if ids is None:
             raise ValidationError(
                 gettext_lazy(
                     "Lifecycle state rules require a 'graphid' and a "
                     "'lifecycle_state_id'."
                 )
             )
-        try:
-            graph = GraphModel.objects.get(pk=graphid, isresource=True)
-        except (GraphModel.DoesNotExist, ValidationError):
-            raise ValidationError(
-                gettext_lazy("%(graphid)s is not the id of a resource model.")
-                % {"graphid": graphid}
-            )
-        try:
-            state = ResourceInstanceLifecycleState.objects.get(
-                pk=stateid,
-                resource_instance_lifecycle_id=graph.resource_instance_lifecycle_id,
-            )
-        except (ResourceInstanceLifecycleState.DoesNotExist, ValidationError):
-            raise ValidationError(
-                gettext_lazy(
-                    "%(stateid)s is not the id of a lifecycle state of graph %(graphid)s."
-                )
-                % {"stateid": stateid, "graphid": graphid}
-            )
-        return graph, state
+        return ids
 
     class Meta:
         proxy = True
