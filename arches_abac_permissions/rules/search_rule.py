@@ -33,6 +33,15 @@ def _values(node, key):
     return found
 
 
+def _has_clause(group):
+    """Whether a query group, or a group nested under it, has a clause."""
+    if not isinstance(group, dict):
+        return False
+    if group.get("clauses"):
+        return True
+    return any(_has_clause(subgroup) for subgroup in group.get("groups") or [])
+
+
 class SearchRule(InclusionRule):
     """
     Rule matching the resources an arches-search advanced search query matches.
@@ -76,7 +85,7 @@ class SearchRule(InclusionRule):
             )
         query = definition["advanced_search_query"]
         # An AND query with no clauses compiles to no filter, matching the whole graph.
-        if not any(_values(query, "clauses")):
+        if not _has_clause(query):
             raise ValidationError(
                 _("A search rule's query must have at least one clause.")
             )

@@ -238,6 +238,20 @@ class SearchRuleTests(LifecycleTestCase):
                 "advanced_search_query": name_query("x", operator="BOGUS")
             },
             "no clauses": {"advanced_search_query": {**name_query("x"), "clauses": []}},
+            "clauses only in aggregations": {
+                "advanced_search_query": {
+                    **name_query("x"),
+                    "clauses": [],
+                    "aggregations": [{"clauses": [1]}],
+                }
+            },
+            "clauses only under an unknown key": {
+                "advanced_search_query": {
+                    **name_query("x"),
+                    "clauses": [],
+                    "note": {"clauses": [1]},
+                }
+            },
             "tile scope with search models": {
                 "advanced_search_query": search_models_query(
                     "HAS_ANY_VALUE", scope="TILE"
@@ -259,6 +273,12 @@ class SearchRuleTests(LifecycleTestCase):
                 with self.assertRaises(ValidationError) as cm:
                     rule.clean()
                 self.assertIn("definition", cm.exception.message_dict)
+
+    def test_clauses_in_nested_groups_count(self):
+        query = {**name_query("x"), "clauses": [], "groups": [name_query("Belfast")]}
+        rule = self.make_search_rule({"advanced_search_query": query})
+        rule.clean()
+        self.assertEqual(set(rule.get_matching_resources()), self.belfast)
 
     def test_current_user_operators_are_rejected(self):
         for operator in ("IS_CURRENT_USER", "IS_NOT_CURRENT_USER"):
