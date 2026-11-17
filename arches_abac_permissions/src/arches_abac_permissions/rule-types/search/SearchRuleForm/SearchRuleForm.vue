@@ -54,10 +54,14 @@ const savedSearchGroups = computed(() =>
             items: sharedSavedSearches.value.map((savedSearch) =>
                 toOption(
                     savedSearch,
-                    $gettext("%{name} (by %{username})", {
-                        name: savedSearch.name,
-                        username: savedSearch.creator.username,
-                    }),
+                    $gettext(
+                        "%{name} (by %{username})",
+                        {
+                            name: savedSearch.name,
+                            username: savedSearch.creator.username,
+                        },
+                        true,
+                    ),
                 ),
             ),
         },
@@ -108,7 +112,7 @@ function toOption(
         id: savedSearch.savedsearchid,
         label: isUsable
             ? label
-            : $gettext("%{label}: can't be used for a rule", { label }),
+            : $gettext("%{label}: can't be used for a rule", { label }, true),
         disabled: !isUsable,
     };
 }

@@ -16,11 +16,20 @@ const toastAdd = vi.hoisted(() => vi.fn());
 vi.mock("@/arches_abac_permissions/rule-types/search/api.ts", () => api);
 vi.mock("openvue/usetoast", () => ({ useToast: () => ({ add: toastAdd }) }));
 
-// The shared setup's $gettext returns the msgid as is; this one fills in %{...}.
+// The shared setup's $gettext returns the msgid as is; this one fills in
+// %{...} and HTML-escapes the values unless asked not to, as vue3-gettext does.
 vi.mock("vue3-gettext", () => ({
     useGettext: () => ({
-        $gettext: (text: string, values: Record<string, string> = {}) =>
-            text.replace(/%\{(\w+)\}/g, (_match, key: string) => values[key]),
+        $gettext: (
+            text: string,
+            values: Record<string, string> = {},
+            disableHtmlEscaping = false,
+        ) =>
+            text.replace(/%\{(\w+)\}/g, (_match, key: string) =>
+                disableHtmlEscaping
+                    ? values[key]
+                    : values[key].replace(/&/g, "&amp;").replace(/</g, "&lt;"),
+            ),
     }),
 }));
 
@@ -134,6 +143,22 @@ describe("SearchRuleForm", () => {
                     },
                 ],
             },
+        ]);
+    });
+
+    it("shows saved search names without HTML escaping", async () => {
+        api.fetchSavedSearches.mockResolvedValue({
+            mine: [savedSearch("own-3", "A & B", "admin", null)],
+            shared: [savedSearch("shared-2", "C & D", "colleague", QUERY)],
+        });
+        const wrapper = mountForm({});
+        await flushPromises();
+        const labels = (
+            select(wrapper).props("options") as { items: { label: string }[] }[]
+        ).flatMap((group) => group.items.map((item) => item.label));
+        expect(labels).toEqual([
+            "A & B: can't be used for a rule",
+            "C & D (by colleague)",
         ]);
     });
 
