@@ -131,4 +131,23 @@ describe("getRuleQuery", () => {
             ),
         ).toBeNull();
     });
+
+    it("rejects malformed saved searches", () => {
+        const noDefinition = {
+            ...savedSearch({}),
+            query_definition: null,
+        } as unknown as SavedSearch;
+        expect(getRuleQuery(noDefinition)).toBeNull();
+        const nullQuery = savedSearch({
+            queries: { advancedQuery: null },
+        } as unknown as Partial<SavedSearchDefinition>);
+        expect(getRuleQuery(nullQuery)).toBeNull();
+    });
+
+    it("rejects a saved query with no clauses", () => {
+        const empty = { ...QUERY, clauses: [] };
+        expect(
+            getRuleQuery(savedSearch({ queries: { advancedQuery: empty } })),
+        ).toBeNull();
+    });
 });

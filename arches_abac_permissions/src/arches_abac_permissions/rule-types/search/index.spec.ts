@@ -38,4 +38,11 @@ describe("search rule completeness", () => {
             }),
         ).toBe(true);
     });
+
+    it("treats groups that aren't objects as having no clauses", () => {
+        const groups = [null] as unknown as AdvancedSearchQuery[];
+        expect(
+            search.isComplete({ advanced_search_query: query({ groups }) }),
+        ).toBe(false);
+    });
 });

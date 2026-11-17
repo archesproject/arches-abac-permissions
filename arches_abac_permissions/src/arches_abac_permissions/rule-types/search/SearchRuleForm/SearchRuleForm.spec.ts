@@ -205,6 +205,19 @@ describe("SearchRuleForm", () => {
         expect(wrapper.find("[role='alert']").exists()).toBe(true);
     });
 
+    it("explains a query with no clauses", async () => {
+        const wrapper = mountForm({});
+        await wrapper
+            .find("#abac-search-query")
+            .setValue(
+                '{"graph_slug": "monument", "clauses": [], "groups": []}',
+            );
+        expect(lastDefinition(wrapper)).toEqual({});
+        expect(wrapper.find("[role='alert']").text()).toContain(
+            "at least one clause",
+        );
+    });
+
     it("clears the definition when the text is emptied", async () => {
         const wrapper = mountForm({ advanced_search_query: QUERY });
         await wrapper.find("#abac-search-query").setValue("  ");

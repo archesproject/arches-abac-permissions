@@ -11,10 +11,13 @@ import {
     ERROR,
 } from "@/arches_abac_permissions/constants.ts";
 import { fetchSavedSearches } from "@/arches_abac_permissions/rule-types/search/api.ts";
+import {
+    isCompleteQuery,
+    isObject,
+} from "@/arches_abac_permissions/rule-types/search/query.ts";
 import { getRuleQuery } from "@/arches_abac_permissions/rule-types/search/saved-search.ts";
 
 import type {
-    AdvancedSearchQuery,
     SavedSearch,
     SearchDefinition,
 } from "@/arches_abac_permissions/rule-types/search/types";
@@ -144,14 +147,21 @@ function onQueryInput(text: string | undefined): void {
     } catch {
         parsed = undefined;
     }
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    if (!isObject(parsed)) {
         queryError.value = $gettext(
             "Paste the query as JSON: one object with a graph_slug and clauses.",
         );
         emitDefinition({});
         return;
     }
-    emitDefinition({ advanced_search_query: parsed as AdvancedSearchQuery });
+    if (!isCompleteQuery(parsed)) {
+        queryError.value = $gettext(
+            "The query needs a graph_slug and at least one clause.",
+        );
+        emitDefinition({});
+        return;
+    }
+    emitDefinition({ advanced_search_query: parsed });
 }
 </script>
 

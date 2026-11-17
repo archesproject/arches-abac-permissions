@@ -1,3 +1,8 @@
+import {
+    isCompleteQuery,
+    isObject,
+} from "@/arches_abac_permissions/rule-types/search/query.ts";
+
 import type {
     AdvancedSearchQuery,
     SavedSearch,
@@ -11,12 +16,17 @@ import type {
 export function getRuleQuery(
     savedSearch: SavedSearch,
 ): AdvancedSearchQuery | null {
+    if (!isObject(savedSearch.query_definition)) {
+        return null;
+    }
     const { terms, queries, graphSlugs, mapFilter } =
         savedSearch.query_definition;
     if ((terms ?? []).length > 0) {
         return null;
     }
-    const savedQueries = Object.values(queries ?? {});
+    const savedQueries = Object.values(queries ?? {}).filter((query) =>
+        isObject(query),
+    );
     const graphSlug =
         queries?.advancedQuery?.graph_slug ??
         (graphSlugs?.length === 1 ? graphSlugs[0] : undefined);
@@ -42,16 +52,17 @@ export function getRuleQuery(
               },
           ]
         : [];
-    if (clauses.length === 0 && groups.length <= 1) {
-        return groups[0] ?? null;
-    }
-    return {
-        graph_slug: graphSlug,
-        scope: "RESOURCE",
-        logic: "AND",
-        clauses,
-        groups,
-        aggregations: [],
-        relationship: null,
-    };
+    const ruleQuery =
+        clauses.length === 0 && groups.length <= 1
+            ? groups[0]
+            : {
+                  graph_slug: graphSlug,
+                  scope: "RESOURCE",
+                  logic: "AND",
+                  clauses,
+                  groups,
+                  aggregations: [],
+                  relationship: null,
+              };
+    return isCompleteQuery(ruleQuery) ? ruleQuery : null;
 }
