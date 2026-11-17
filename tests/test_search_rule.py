@@ -95,6 +95,49 @@ def search_models_query(operator, scope="RESOURCE"):
     }
 
 
+def with_operand_value(query, value):
+    query["clauses"][0]["operands"][0]["value"] = value
+    return query
+
+
+def unclosed_area_query():
+    unclosed_ring = [[[0, 0], [1, 1]]]
+    return {
+        **name_query("x"),
+        "clauses": [
+            {
+                "type": "LITERAL",
+                "quantifier": "ANY",
+                "subject": {
+                    "type": "SEARCH_MODELS",
+                    "graph_slug": "test_graph",
+                    "node_alias": "",
+                    "search_models": ["GeometrySearch"],
+                },
+                "operator": "GEO_INTERSECTS",
+                "operands": [
+                    {
+                        "type": "GEO_LITERAL",
+                        "value": {
+                            "type": "FeatureCollection",
+                            "features": [
+                                {
+                                    "type": "Feature",
+                                    "properties": {},
+                                    "geometry": {
+                                        "type": "Polygon",
+                                        "coordinates": unclosed_ring,
+                                    },
+                                }
+                            ],
+                        },
+                    }
+                ],
+            }
+        ],
+    }
+
+
 class SearchRuleDefinitionTests(LifecycleTestCase):
     @mock.patch(
         "arches_abac_permissions.rules.search_rule.ARCHES_SEARCH_INSTALLED", False
@@ -203,6 +246,12 @@ class SearchRuleTests(LifecycleTestCase):
             "search models with unknown operator": {
                 "advanced_search_query": search_models_query("BOGUS")
             },
+            "operand that fails when run": {
+                "advanced_search_query": with_operand_value(
+                    name_query("x", operator="EQUALS"), [1, 2]
+                )
+            },
+            "unclosed area": {"advanced_search_query": unclosed_area_query()},
         }
         for label, definition in cases.items():
             with self.subTest(label):
@@ -269,9 +318,7 @@ class SearchRuleTests(LifecycleTestCase):
         rule = InclusionRule.objects.get(pk=response.json()["id"])
         self.assertEqual(set(rule.get_matching_resources()), self.belfast)
 
-    def test_rules_api_returns_compile_errors(self):
-        response = self.post_rule(
-            {"advanced_search_query": name_query("Belfast", alias="missing")}
-        )
+    def test_rules_api_rejects_a_query_that_cannot_run(self):
+        response = self.post_rule({"advanced_search_query": unclosed_area_query()})
         self.assertEqual(response.status_code, 400)
-        self.assertTrue(response.json()["message"])
+        self.assertIn("The query can't be run", response.json()["message"])

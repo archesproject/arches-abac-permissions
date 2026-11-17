@@ -1,6 +1,7 @@
 from django.apps import apps
 from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
+from django.db import transaction
 from django.utils import translation
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
@@ -101,7 +102,17 @@ class SearchRule(InclusionRule):
 
     @classmethod
     def validate_definition(cls, inclusion_rule):
-        cls.compile(inclusion_rule)
+        # Compiling doesn't run the SQL, and a query that only fails when run
+        # would break every permission check for the rule's groups.
+        try:
+            with transaction.atomic():
+                cls.compile(inclusion_rule).exists()
+        except ValidationError:
+            raise
+        except Exception as error:
+            raise ValidationError(
+                _("The query can't be run: %(error)s") % {"error": error}
+            )
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
