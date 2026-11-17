@@ -148,11 +148,12 @@ class SearchRuleDefinitionTests(LifecycleTestCase):
             classname="SearchRule",
             definition={"advanced_search_query": name_query("Belfast")},
         )
-        with self.assertRaises(ValidationError):
+        message = "Search rules require arches-search."
+        with self.assertRaisesMessage(ValidationError, message):
             rule.clean()
-        with self.assertRaises(ValidationError):
+        with self.assertRaisesMessage(ValidationError, message):
             rule.matches_resource(self.matching)
-        with self.assertRaises(ValidationError):
+        with self.assertRaisesMessage(ValidationError, message):
             rule.get_matching_resources()
 
 
