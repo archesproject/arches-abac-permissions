@@ -63,11 +63,7 @@ class SearchRule(InclusionRule):
     @classmethod
     def clean_definition(cls, raw_definition, definition_keys):
         # The query is nested JSON, which the default would turn into a string.
-        return {
-            key: raw_definition[key]
-            for key in definition_keys
-            if raw_definition.get(key) is not None
-        }
+        return {"advanced_search_query": raw_definition.get("advanced_search_query")}
 
     @classmethod
     def compile(cls, inclusion_rule):

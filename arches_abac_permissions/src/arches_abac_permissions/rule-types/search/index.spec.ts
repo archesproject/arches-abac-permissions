@@ -9,11 +9,8 @@ function query(overrides: Partial<AdvancedSearchQuery>): AdvancedSearchQuery {
 }
 
 describe("search rule completeness", () => {
-    it("requires a query", () => {
+    it("requires a query with a graph slug", () => {
         expect(search.isComplete({})).toBe(false);
-    });
-
-    it("requires a graph slug", () => {
         expect(
             search.isComplete({
                 advanced_search_query: query({ graph_slug: "", clauses: [{}] }),

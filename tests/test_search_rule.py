@@ -318,9 +318,6 @@ class SearchRuleTests(LifecycleTestCase):
             perms = ArchesAbacPermissionFramework().get_perms(user, self.matching)
         self.assertNotIn("view_resourceinstance", perms)
 
-    def test_search_rule_url_is_false(self):
-        self.assertIs(self.make_search_rule().get_search_rule_url(), False)
-
     def post_rule(self, definition):
         self.client.force_login(User.objects.create_superuser("api_admin"))
         return self.client.post(

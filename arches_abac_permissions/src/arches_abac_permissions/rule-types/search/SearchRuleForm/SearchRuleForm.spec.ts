@@ -213,21 +213,16 @@ describe("SearchRuleForm", () => {
         expect(wrapper.find("[role='alert']").exists()).toBe(false);
     });
 
-    it("reports invalid JSON and keeps the text", async () => {
-        const wrapper = mountForm({ advanced_search_query: QUERY });
-        await wrapper.find("#abac-search-query").setValue("{ not json");
-        expect(lastDefinition(wrapper)).toEqual({});
-        expect(wrapper.find("[role='alert']").text()).toContain(
-            "Paste the query as JSON",
-        );
-        expect(textarea(wrapper).value).toBe("{ not json");
-    });
-
-    it("rejects JSON that is not an object", async () => {
-        const wrapper = mountForm({});
-        await wrapper.find("#abac-search-query").setValue("[1, 2]");
-        expect(lastDefinition(wrapper)).toEqual({});
-        expect(wrapper.find("[role='alert']").exists()).toBe(true);
+    it("reports text that isn't a JSON object and keeps it", async () => {
+        for (const text of ["{ not json", "[1, 2]"]) {
+            const wrapper = mountForm({ advanced_search_query: QUERY });
+            await wrapper.find("#abac-search-query").setValue(text);
+            expect(lastDefinition(wrapper)).toEqual({});
+            expect(wrapper.find("[role='alert']").text()).toContain(
+                "Paste the query as JSON",
+            );
+            expect(textarea(wrapper).value).toBe(text);
+        }
     });
 
     it("explains a query with no clauses", async () => {

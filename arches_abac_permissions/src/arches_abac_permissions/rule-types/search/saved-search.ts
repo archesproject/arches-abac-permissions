@@ -24,17 +24,14 @@ export function getRuleQuery(
     if ((terms ?? []).length > 0) {
         return null;
     }
-    const savedQueries = Object.values(queries ?? {}).filter((query) =>
-        isObject(query),
-    );
     const graphSlug =
         queries?.advancedQuery?.graph_slug ??
         (graphSlugs?.length === 1 ? graphSlugs[0] : undefined);
     if (!graphSlug) {
         return null;
     }
-    const groups = savedQueries.filter(
-        (query) => query.graph_slug === graphSlug,
+    const groups = Object.values(queries ?? {}).filter(
+        (query) => isObject(query) && query.graph_slug === graphSlug,
     );
     const clauses = mapFilter?.features?.length
         ? [
