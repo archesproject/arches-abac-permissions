@@ -3,8 +3,10 @@ from django.conf import settings
 from django.core.exceptions import ObjectDoesNotExist, ValidationError
 from django.utils import translation
 from django.utils.translation import gettext as _
+from django.utils.translation import gettext_lazy
 
 from arches_abac_permissions.models import InclusionRule
+from arches_abac_permissions.rule_types import RuleType
 
 CURRENT_USER_OPERATORS = {"IS_CURRENT_USER", "IS_NOT_CURRENT_USER"}
 
@@ -36,6 +38,26 @@ class SearchRule(InclusionRule):
 
     definition: {"advanced_search_query": <one graph's arches-search query>}
     """
+
+    rule_type = RuleType(
+        key="search",
+        label=gettext_lazy("Resource matches an Advanced Search"),
+        description=gettext_lazy(
+            "Matches the resources an arches-search advanced search query finds"
+        ),
+        icon="pi pi-search",
+        definition_keys=("advanced_search_query",),
+        required_app="arches_search",
+    )
+
+    @classmethod
+    def clean_definition(cls, raw_definition, definition_keys):
+        # The query is nested JSON, which the default would turn into a string.
+        return {
+            key: raw_definition[key]
+            for key in definition_keys
+            if raw_definition.get(key) is not None
+        }
 
     @classmethod
     def compile(cls, inclusion_rule):

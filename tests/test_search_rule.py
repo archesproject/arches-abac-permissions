@@ -1,19 +1,25 @@
 import copy
+import json
+from unittest import mock, skipUnless
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
 from django.db import connection
 from django.test.utils import CaptureQueriesContext
+from django.urls import reverse
 from django.utils import translation
 
 from arches.app.models.models import Node, ResourceInstance, TileModel
-from arches_abac_permissions.models import InclusionRuleGroupPermission
+from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.permissions.arches_abac_permission_framework import (
     ArchesAbacPermissionFramework,
 )
-from arches_search.models.models import TermSearch
-
+from arches_abac_permissions.rules.search_rule import SearchRule
 from tests.test_inclusion_rules import LifecycleTestCase, make_rule
+
+ARCHES_SEARCH_INSTALLED = SearchRule.rule_type.available
+if ARCHES_SEARCH_INSTALLED:
+    from arches_search.models.models import TermSearch
 
 FRAMEWORK_LOGGER = (
     "arches_abac_permissions.permissions.arches_abac_permission_framework"
@@ -89,6 +95,25 @@ def search_models_query(operator, scope="RESOURCE"):
     }
 
 
+class SearchRuleDefinitionTests(LifecycleTestCase):
+    @mock.patch(
+        "arches_abac_permissions.rules.search_rule.ARCHES_SEARCH_INSTALLED", False
+    )
+    def test_without_arches_search(self):
+        rule = make_rule(
+            modulename="search_rule.py",
+            classname="SearchRule",
+            definition={"advanced_search_query": name_query("Belfast")},
+        )
+        with self.assertRaises(ValidationError):
+            rule.clean()
+        with self.assertRaises(ValidationError):
+            rule.matches_resource(self.matching)
+        with self.assertRaises(ValidationError):
+            rule.get_matching_resources()
+
+
+@skipUnless(ARCHES_SEARCH_INSTALLED, "arches-search is not installed")
 class SearchRuleTests(LifecycleTestCase):
     @classmethod
     def setUpTestData(cls):
@@ -223,3 +248,30 @@ class SearchRuleTests(LifecycleTestCase):
 
     def test_search_rule_url_is_false(self):
         self.assertIs(self.make_search_rule().get_search_rule_url(), False)
+
+    def post_rule(self, definition):
+        self.client.force_login(User.objects.create_superuser("api_admin"))
+        return self.client.post(
+            reverse("abac_rules"),
+            data=json.dumps(
+                {"name": "Belfast", "rule_type": "search", "definition": definition}
+            ),
+            content_type="application/json",
+        )
+
+    def test_created_through_the_rules_api(self):
+        query = name_query("Belfast")
+        response = self.post_rule({"advanced_search_query": query})
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(
+            response.json()["definition"], {"advanced_search_query": query}
+        )
+        rule = InclusionRule.objects.get(pk=response.json()["id"])
+        self.assertEqual(set(rule.get_matching_resources()), self.belfast)
+
+    def test_rules_api_returns_compile_errors(self):
+        response = self.post_rule(
+            {"advanced_search_query": name_query("Belfast", alias="missing")}
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertTrue(response.json()["message"])

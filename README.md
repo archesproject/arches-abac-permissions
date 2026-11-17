@@ -332,8 +332,8 @@ Things to be aware of:
 
 A search rule matches whatever an [arches-search](https://github.com/archesproject/arches-search) advanced search matches. Install arches-search alongside this package (`pip install "arches-abac-permissions[arches-search]"`) and add it to `INSTALLED_APPS` as its README describes.
 
-1. Build the search in arches-search's advanced search, and copy its query (the JSON for one resource model, with `graph_slug`, `logic`, `clauses` and `groups`).
-2. In the admin, add an inclusion rule with `modulename` `search_rule.py`, `classname` `SearchRule`, and the query as the definition:
+1. Build the search in arches-search's advanced search. Either save it, or copy its query from the **Payload** tab (the JSON for one resource model, with `graph_slug`, `logic`, `clauses` and `groups`).
+2. In the plugin, add a *Resource matches an Advanced Search* rule, and choose the search under **Start from a saved search** (your own and those shared with you) or paste the query. Choosing a saved search copies its query; the rule doesn't follow later changes to the search. A drawn map area and other filters are combined into the copied query, as arches-search combines them when it runs the search; searches with free-text terms can't be used. Or, in the admin, add an inclusion rule with `modulename` `search_rule.py`, `classname` `SearchRule`, and the query as the definition:
 
     ```json
     {"advanced_search_query": {"graph_slug": "monument", "scope": "RESOURCE", "logic": "AND", "clauses": [...], "groups": [], "aggregations": [], "relationship": null}}
@@ -341,7 +341,7 @@ A search rule matches whatever an [arches-search](https://github.com/archesproje
 
 3. Grant permissions to a group, as for any rule.
 
-Saving the rule checks that arches-search can compile the query, so a mistake (an unknown node, an operator the node's datatype doesn't support) is reported in the admin. Nothing compiled is stored: the query is compiled each time the rule is evaluated. When abac filters a list of resources (as arches-search does), the rule runs as part of that same database query; checking a single resource runs a separate small query for each search rule.
+Saving the rule checks that arches-search can compile the query, so a mistake (an unknown node, an operator the node's datatype doesn't support) is reported when you save, in the plugin or the admin. Nothing compiled is stored: the query is compiled each time the rule is evaluated. When abac filters a list of resources (as arches-search does), the rule runs as part of that same database query; checking a single resource runs a separate small query for each search rule.
 
 Things to be aware of:
 
