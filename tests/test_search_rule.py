@@ -266,6 +266,8 @@ class SearchRuleTests(LifecycleTestCase):
                 )
             },
             "unclosed area": {"advanced_search_query": unclosed_area_query()},
+            "empty value": {"advanced_search_query": name_query("")},
+            "blank value": {"advanced_search_query": name_query("  ")},
         }
         for label, definition in cases.items():
             with self.subTest(label):

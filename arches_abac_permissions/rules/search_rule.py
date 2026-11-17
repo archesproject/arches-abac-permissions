@@ -98,6 +98,11 @@ class SearchRule(InclusionRule):
                     "run as any one user."
                 )
             )
+        if any(
+            isinstance(value, str) and not value.strip()
+            for value in _values(query, "value")
+        ):
+            raise ValidationError(_("A search rule's query can't have an empty value."))
         if not ARCHES_SEARCH_INSTALLED:
             raise ValidationError(_("Search rules require arches-search."))
 
