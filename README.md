@@ -112,7 +112,7 @@ pip install -e arches-abac-permissions --group dev
 Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permissions`). It lets you manage inclusion rules without the Django admin:
 
 - **Rules** (left): filter, add, and delete rules.
-- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed); a resource model, node and value for *Resource has Node Value*; or a resource model, geometry node, spatial relationship and an area drawn on a map (or entered as GeoJSON) with an optional buffer for *Resource is in Area*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
+- **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed); a resource model, node and value for *Resource has Node Value*; a resource model, geometry node, spatial relationship and an area drawn on a map (or entered as GeoJSON) with an optional buffer for *Resource is in Area*; or a saved search to start from, or a pasted arches-search query, for *Resource matches an Advanced Search* (only offered when `arches_search` is installed). *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
 - **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members, or a built-in Arches group (tagged *Built-in*), cannot be deleted. Groups tagged *Public* apply to logged-out visitors, and the plugin warns when such a group is granted access. **Save** stores the rule, its definition and all grants together.
 
 The **Group Membership** view (switch at the top) lists groups, users and an editor. Filter users by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
@@ -341,16 +341,16 @@ A search rule matches whatever an [arches-search](https://github.com/archesproje
 
 3. Grant permissions to a group, as for any rule.
 
-Saving the rule checks that arches-search can compile the query, so a mistake (an unknown node, an operator the node's datatype doesn't support) is reported when you save, in the plugin or the admin. Nothing compiled is stored: the query is compiled each time the rule is evaluated. When abac filters a list of resources (as arches-search does), the rule runs as part of that same database query; checking a single resource runs a separate small query for each search rule.
+Saving the rule compiles the query and runs it once, so a mistake (an unknown node, an operator the node's datatype doesn't support, a value or area the database can't use) is reported when you save, in the plugin or the admin. Nothing compiled is stored: the query is compiled each time the rule is evaluated. When abac filters a list of resources (as arches-search does), the rule runs as part of that same database query; checking a single resource compiles the query (a few lookups for its resource model and nodes) and runs one query, for each search rule.
 
 Things to be aware of:
 
 - **The rule is a copy.** It doesn't follow a saved search, so editing or deleting the search doesn't change the rule. Saving a rule makes the search's criteria visible to everyone who can see rules.
 - **Graph changes apply straight away**, because the query is compiled when used. If it can no longer be compiled (for example, a node it uses was removed), the rule matches nothing and logs an error until it's fixed.
 - **Queries can't use "is me" or "is not me".** A rule doesn't run as any one user.
-- **A query needs at least one clause.** An empty query would otherwise match every resource of its graph.
+- **A query needs at least one clause, and no empty values.** An empty query, or a blank value such as `STARTS_WITH ""`, would otherwise match every resource of its graph.
 - **Queries are compiled in the site's default language (`LANGUAGE_CODE`).** Some arches-search lookups, such as a resource's name, depend on the language, and a rule must match the same resources for every user.
-- Rules created in code aren't checked unless `full_clean()` (or `clean()`) is called before saving. An invalid one matches nothing and logs an error.
+- Rules created in code aren't checked unless `full_clean()` (or `clean()`) is called before saving. An invalid one matches nothing and logs an error, unless its query only fails in the database: that error is raised, so permission checks for the rule's groups fail until it's fixed.
 
 ## Indexes for rules
 
@@ -360,6 +360,7 @@ Rules are evaluated with SQL whenever permissions are checked, so a large databa
 - *Resource is in Resource Set*: none; the set membership table is already indexed.
 - *Resource has Node Value*: a partial GIN index on the node's value in `tiles`, one per node. Rules on the same node share it.
 - *Resource is in Area*: a partial GiST index on `geojson_geometries.geom` for the node, one per node. Rules on the same node share it.
+- *Resource matches an Advanced Search*: none; the query runs against arches-search's own search tables, which arches-search indexes.
 
 Custom rule classes can return their own SQL from a `get_index_sql(cls, inclusion_rule)` classmethod; the default returns `None`.
 
