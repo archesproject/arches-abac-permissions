@@ -176,14 +176,14 @@ function onQueryInput(text: string | undefined): void {
         }}</label>
         <Select
             input-id="abac-saved-search"
-            :model-value="selectedSavedSearchId"
-            :options="savedSearchGroups"
             option-group-label="label"
             option-group-children="items"
-            :loading="isLoadingSavedSearches"
             option-label="label"
             option-value="id"
             option-disabled="disabled"
+            :model-value="selectedSavedSearchId"
+            :options="savedSearchGroups"
+            :loading="isLoadingSavedSearches"
             :filter="true"
             :placeholder="$gettext('Select a saved search…')"
             :empty-message="$gettext('You have no saved searches')"
