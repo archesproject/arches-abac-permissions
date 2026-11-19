@@ -1,5 +1,6 @@
 import uuid
 from decimal import Decimal, InvalidOperation
+from typing import NamedTuple
 
 from django.apps import apps
 from django.core.exceptions import ValidationError
@@ -14,7 +15,6 @@ from arches.app.models.models import (
     TileModel,
 )
 from arches_abac_permissions.models import InclusionRule
-from arches_abac_permissions.rule_cache import get_cached
 from arches_abac_permissions.rule_types import RuleType
 from arches_abac_permissions.rules.utils import get_resource_node
 
@@ -50,6 +50,15 @@ def parse_uuid(value):
         raise ValidationError(_("%s is not a valid id.") % value)
 
 
+class TileArgs(NamedTuple):
+    graph_id: uuid.UUID
+    node_id: uuid.UUID
+    nodegroup_id: uuid.UUID
+    datatype: str
+    value: str
+    language: str
+
+
 class TileNodeValueRule(InclusionRule):
     """
     Rule matching resources with a tile whose node holds a value.
@@ -58,8 +67,13 @@ class TileNodeValueRule(InclusionRule):
         "graphid": "<graph id>",
         "nodeid": "<node id>",
         "value": "<value, always a string>",
-        "language": "<language code, string nodes only; empty for any>"
+        "language": "<language code, string nodes only; empty for any>",
+        "nodegroupid": "<node's nodegroup id>",
+        "datatype": "<node's datatype>"
     }
+
+    nodegroupid and datatype are derived from the node when the rule is
+    validated (never taken from clients), so evaluation needs no node lookup.
 
     Matching is exact. List-valued nodes (domain-value-list,
     resource-instance(-list), reference) match when they contain the value.
@@ -82,11 +96,13 @@ class TileNodeValueRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        node, value_filter = get_cached(inclusion_rule, cls.get_tile_filter)
+        args = cls.find_args(inclusion_rule.definition)
+        if args is None:
+            return ResourceInstance.objects.none()
         tiles = TileModel.objects.filter(
-            value_filter,
-            nodegroup_id=node.nodegroup_id,
-            resourceinstance__graph_id=node.graph_id,
+            cls.get_value_filter(args),
+            nodegroup_id=args.nodegroup_id,
+            resourceinstance__graph_id=args.graph_id,
         )
         return ResourceInstance.objects.filter(
             pk__in=tiles.values("resourceinstance_id")
@@ -94,16 +110,26 @@ class TileNodeValueRule(InclusionRule):
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        node, value_filter = get_cached(inclusion_rule, cls.get_tile_filter)
-        if resource.graph_id != node.graph_id:
+        args = cls.find_args(inclusion_rule.definition)
+        if args is None or resource.graph_id != args.graph_id:
             return False
         return TileModel.objects.filter(
-            value_filter, nodegroup_id=node.nodegroup_id, resourceinstance=resource
+            cls.get_value_filter(args),
+            nodegroup_id=args.nodegroup_id,
+            resourceinstance=resource,
         ).exists()
 
     @classmethod
     def validate_definition(cls, inclusion_rule):
-        cls.parse_definition(inclusion_rule.definition, validate_value=True)
+        """Check the rule against the database and store the node's server-derived keys."""
+        definition = inclusion_rule.definition
+        graphid, nodeid, _value = cls.require_keys(definition)
+        node = get_resource_node(graphid, nodeid)
+        definition["nodegroupid"] = str(node.nodegroup_id)
+        definition["datatype"] = node.datatype
+        args = cls.get_args(definition)
+        cls.validate_value(node, args.value, args.language)
+        definition["value"] = args.value
 
     @classmethod
     def get_index_sql(cls, inclusion_rule):
@@ -122,26 +148,26 @@ class TileNodeValueRule(InclusionRule):
         )
 
     @classmethod
-    def get_tile_filter(cls, definition):
-        """Return the node and a Q matching tiles whose node holds the value."""
-        node, value, language = cls.parse_definition(definition)
-        lookup = f"data__{node.pk}__contains"
+    def get_value_filter(cls, args):
+        """Return a Q matching tiles whose node holds the value."""
+        lookup = f"data__{args.node_id}__contains"
         value_filter = Q()
-        for fragment in cls.get_fragments(node, value, language):
+        for fragment in cls.get_fragments(args):
             value_filter |= Q(**{lookup: fragment})
         if not value_filter:
             # A string rule for "any language" with no languages matches nothing.
             value_filter = Q(pk__in=[])
-        return node, value_filter
+        return value_filter
 
     @staticmethod
-    def get_fragments(node, value, language):
+    def get_fragments(args):
         """JSON fragments; a tile matches if its node value contains any of them."""
-        match node.datatype:
+        value = args.value
+        match args.datatype:
             case "string":
                 codes = (
-                    [language]
-                    if language
+                    [args.language]
+                    if args.language
                     else Language.objects.values_list("code", flat=True)
                 )
                 return [{code: {"value": value}} for code in codes]
@@ -161,28 +187,43 @@ class TileNodeValueRule(InclusionRule):
             case _:
                 return [value]
 
-    @classmethod
-    def parse_definition(cls, definition, validate_value=False):
+    @staticmethod
+    def require_keys(definition):
         graphid = definition.get("graphid")
         nodeid = definition.get("nodeid")
         value = definition.get("value")
-        language = definition.get("language") or ""
         if not graphid or not nodeid or value in (None, ""):
             raise ValidationError(
                 _(
                     "Tile node value rules require a 'graphid', a 'nodeid' and a 'value'."
                 )
             )
-        node = get_resource_node(graphid, nodeid)
-        if node.datatype not in get_supported_datatypes():
+        return graphid, nodeid, value
+
+    @classmethod
+    def find_args(cls, definition):
+        """Like get_args, but None for a malformed definition (it matches nothing)."""
+        try:
+            return cls.get_args(definition)
+        except ValidationError:
+            return None
+
+    @classmethod
+    def get_args(cls, definition):
+        """Parse the definition without database access."""
+        graphid, nodeid, value = cls.require_keys(definition)
+        datatype = definition.get("datatype")
+        value = str(value)
+        language = definition.get("language") or ""
+        if datatype not in get_supported_datatypes():
             raise ValidationError(
-                _("Nodes of datatype %s are not supported.") % node.datatype
+                _("Nodes of datatype %s are not supported.") % datatype
             )
-        if language and node.datatype != "string":
+        if language and datatype != "string":
             raise ValidationError(_("Only string nodes take a language."))
-        if node.datatype in UUID_DATATYPES:
+        if datatype in UUID_DATATYPES:
             value = str(parse_uuid(value))
-        elif node.datatype == "number":
+        elif datatype == "number":
             try:
                 number = Decimal(value)
                 if not number.is_finite():
@@ -197,11 +238,16 @@ class TileNodeValueRule(InclusionRule):
                 raise ValidationError(
                     _("%s has more precision than can be matched.") % value
                 )
-        elif node.datatype == "boolean" and value not in ("true", "false"):
+        elif datatype == "boolean" and value not in ("true", "false"):
             raise ValidationError(_("A boolean value must be 'true' or 'false'."))
-        if validate_value:
-            cls.validate_value(node, value, language)
-        return node, value, language
+        return TileArgs(
+            parse_uuid(graphid),
+            parse_uuid(nodeid),
+            parse_uuid(definition.get("nodegroupid")),
+            datatype,
+            value,
+            language,
+        )
 
     @staticmethod
     def validate_value(node, value, language):
