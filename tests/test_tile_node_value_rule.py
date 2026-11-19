@@ -4,6 +4,7 @@ from unittest import skipUnless
 
 from django.apps import apps
 from django.core.exceptions import ValidationError
+from django.db.models import Q
 from django.urls import reverse
 
 from arches.app.models.models import (
@@ -11,6 +12,7 @@ from arches.app.models.models import (
     Language,
     Node,
     NodeGroup,
+    ResourceInstance,
     TileModel,
 )
 from arches_abac_permissions.models import InclusionRule
@@ -154,6 +156,34 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
     def test_boolean_false(self):
         rule = self.make_value_rule("boolean", "false")
         self.assertEqual(set(rule.get_matching_resources()), {self.miss})
+
+    def test_other_nodegroup_does_not_match(self):
+        other = ResourceInstance.objects.create(
+            graph=self.graph, resource_instance_lifecycle_state=self.active_state
+        )
+        TileModel.objects.create(
+            resourceinstance=other,
+            nodegroup=self.nodegroup,
+            data={str(self.nodes["non-localized-string"].pk): "abc"},
+            sortorder=0,
+        )
+        rule = self.make_value_rule("non-localized-string", "abc")
+        self.assertEqual(set(rule.get_matching_resources()), {self.hit})
+        self.assertFalse(rule.matches_resource(other))
+
+    def test_no_fragments_match_nothing(self):
+        Language.objects.all().delete()
+        rule = self.make_value_rule("string", "hola")
+        self.assertFalse(rule.get_matching_resources().exists())
+
+    def test_composes_as_framework_filter(self):
+        rule = self.make_value_rule("non-localized-string", "abc")
+        matching = rule.get_matching_resources()
+        queryset = ResourceInstance.objects.filter(
+            Q(pk__in=matching.values("pk")) | Q(pk=self.miss.pk)
+        )
+        self.assertEqual(set(queryset), {self.hit, self.miss})
+        self.assertEqual(queryset.count(), 2)
 
     def test_other_graph_does_not_match(self):
         rule = self.make_value_rule("non-localized-string", "abc")

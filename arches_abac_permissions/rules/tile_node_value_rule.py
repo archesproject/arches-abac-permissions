@@ -4,7 +4,7 @@ from typing import NamedTuple
 
 from django.apps import apps
 from django.core.exceptions import ValidationError
-from django.db.models import Q
+from django.db.models import Exists, OuterRef, Q
 from django.utils.translation import gettext as _
 from django.utils.translation import gettext_lazy
 
@@ -102,11 +102,9 @@ class TileNodeValueRule(InclusionRule):
         tiles = TileModel.objects.filter(
             cls.get_value_filter(args),
             nodegroup_id=args.nodegroup_id,
-            resourceinstance__graph_id=args.graph_id,
+            resourceinstance_id=OuterRef("pk"),
         )
-        return ResourceInstance.objects.filter(
-            pk__in=tiles.values("resourceinstance_id")
-        )
+        return ResourceInstance.objects.filter(Exists(tiles))
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
