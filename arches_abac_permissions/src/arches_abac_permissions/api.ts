@@ -3,11 +3,30 @@ import Cookies from "js-cookie";
 
 import type {
     Group,
+    NewUserFieldErrors,
+    NewUserPayload,
     Rule,
     RuleTypeInfo,
     User,
     UserDetails,
+    UserDirectory,
+    UserUpdatePayload,
 } from "@/arches_abac_permissions/types";
+
+export class ApiError extends Error {
+    fieldErrors: NewUserFieldErrors;
+    code?: string;
+
+    constructor(
+        message: string,
+        fieldErrors: NewUserFieldErrors = {},
+        code?: string,
+    ) {
+        super(message);
+        this.fieldErrors = fieldErrors;
+        this.code = code;
+    }
+}
 
 function getToken(): string {
     const token = Cookies.get("csrftoken");
@@ -44,7 +63,11 @@ export async function request<T>(
         throw new Error(response.statusText, { cause: error });
     }
     if (!response.ok) {
-        throw new Error(parsed.message || response.statusText);
+        throw new ApiError(
+            parsed.message || response.statusText,
+            parsed.errors,
+            parsed.code,
+        );
     }
     return parsed as T;
 }
@@ -74,8 +97,16 @@ export const createGroup = (name: string) =>
 export const deleteGroup = (groupId: number) =>
     request<void>(arches.urls.abac_group(groupId), "DELETE");
 
-export const fetchUsers = async () =>
-    (await request<{ users: User[] }>(arches.urls.abac_users)).users;
+export const fetchUsers = () => request<UserDirectory>(arches.urls.abac_users);
+
+export const createUser = (payload: NewUserPayload) =>
+    request<User>(arches.urls.abac_users, "POST", payload);
+
+export const updateUser = (userId: number, payload: UserUpdatePayload) =>
+    request<UserDetails>(arches.urls.abac_user(userId), "PATCH", payload);
+
+export const deleteUser = (userId: number) =>
+    request<void>(arches.urls.abac_user(userId), "DELETE");
 
 export const fetchUserDetails = (userId: number) =>
     request<UserDetails>(arches.urls.abac_user(userId));

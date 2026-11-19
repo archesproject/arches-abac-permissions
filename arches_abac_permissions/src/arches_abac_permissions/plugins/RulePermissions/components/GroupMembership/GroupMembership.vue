@@ -7,18 +7,26 @@ import Checkbox from "openvue/checkbox";
 import InputText from "openvue/inputtext";
 import ProgressSpinner from "openvue/progressspinner";
 import Select from "openvue/select";
+import ToggleSwitch from "openvue/toggleswitch";
+import { useConfirm } from "openvue/useconfirm";
 import { useToast } from "openvue/usetoast";
 
 import {
+    ApiError,
     changeMembership,
+    deleteUser,
     fetchUserDetails,
     fetchUsers,
+    updateUser,
 } from "@/arches_abac_permissions/api.ts";
-import AddUsersDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddUsersDialog/AddUsersDialog.vue";
+import DeleteUserDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/DeleteUserDialog/DeleteUserDialog.vue";
+import UserForm from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/UserForm/UserForm.vue";
 import GroupTags from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupTags/GroupTags.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
+    DEFAULT_SUCCESS_TOAST_LIFE,
     ERROR,
+    SUCCESS,
 } from "@/arches_abac_permissions/constants.ts";
 import {
     userDisplayName,
@@ -35,6 +43,7 @@ const PENDING_VALUE = "—";
 const { $gettext } = useGettext();
 const noGroupsLabel = $gettext("<no groups>");
 const toast = useToast();
+const confirm = useConfirm();
 
 const props = defineProps<{ groups: Group[] }>();
 const emit = defineEmits<{
@@ -52,9 +61,14 @@ const activeId = ref<number | null>(null);
 const activeUserDetails = ref<UserDetails | null>(null);
 const isBulkEditing = ref(false);
 const pendingGroup = ref<number | null>(null);
-const showAddUsers = ref(false);
-// Hidden until the comp's "Add User" behaviour is defined.
-const ADD_USER_ENABLED = false;
+const isCreatingUser = ref(false);
+const isEditingUser = ref(false);
+const currentUserId = ref<number | null>(null);
+const deleteTarget = ref<User | null>(null);
+const deleteDetails = ref<UserDetails | null>(null);
+const isDeleting = ref(false);
+const isUserFormDirty = ref(false);
+const inviteExpiryHours = ref(0);
 
 const groupsById = computed(
     () => new Map(props.groups.map((group) => [group.id, group])),
@@ -94,6 +108,9 @@ const visibleUsers = computed(() =>
     }),
 );
 
+const isUserFormOpen = computed(
+    () => isCreatingUser.value || isEditingUser.value,
+);
 const activeUser = computed(
     () => users.value.find((user) => user.id === activeId.value) ?? null,
 );
@@ -151,14 +168,169 @@ function clearChecked(): void {
     isBulkEditing.value = false;
 }
 
+function closeUserForm(): void {
+    isCreatingUser.value = false;
+    isEditingUser.value = false;
+    isUserFormDirty.value = false;
+}
+
+// Runs the action, first confirming if the open user form has unsaved changes.
+function guardUserForm(action: () => void): void {
+    if (!isUserFormOpen.value || !isUserFormDirty.value) {
+        action();
+        return;
+    }
+    confirm.require({
+        header: $gettext("Discard changes?"),
+        message: isCreatingUser.value
+            ? $gettext("The new account has not been created yet.")
+            : $gettext("Your changes to this account have not been saved."),
+        icon: "fa fa-exclamation-triangle",
+        acceptProps: { label: $gettext("Discard"), severity: "danger" },
+        rejectProps: { label: $gettext("Keep editing"), severity: "secondary" },
+        accept: action,
+    });
+}
+
 function openUser(user: User): void {
-    activeId.value = user.id;
-    isBulkEditing.value = false;
+    guardUserForm(() => {
+        closeUserForm();
+        activeId.value = user.id;
+        isBulkEditing.value = false;
+    });
 }
 
 function openBulkEdit(): void {
-    isBulkEditing.value = true;
-    activeId.value = null;
+    guardUserForm(() => {
+        closeUserForm();
+        isBulkEditing.value = true;
+        activeId.value = null;
+    });
+}
+
+function startNewUser(): void {
+    guardUserForm(() => {
+        closeUserForm();
+        isCreatingUser.value = true;
+        isBulkEditing.value = false;
+        activeId.value = null;
+    });
+}
+
+function startEditUser(): void {
+    guardUserForm(() => {
+        closeUserForm();
+        isEditingUser.value = true;
+    });
+}
+
+function toastSuccess(summary: string): void {
+    toast.add({ severity: SUCCESS, life: DEFAULT_SUCCESS_TOAST_LIFE, summary });
+}
+
+function onUserCreated(user: User): void {
+    users.value = [...users.value, user];
+    filter.value = "";
+    groupFilter.value = null;
+    closeUserForm();
+    activeId.value = user.id;
+    toastSuccess(
+        $gettext("Invitation sent to %{name}", { name: userDisplayName(user) }),
+    );
+}
+
+function applyUserDetails(details: UserDetails): void {
+    mergeUsers([details]);
+    if (details.id === activeId.value) {
+        activeUserDetails.value = details;
+    }
+}
+
+function onUserUpdated(details: UserDetails, resetSent: boolean): void {
+    applyUserDetails(details);
+    closeUserForm();
+    toastSuccess(
+        resetSent
+            ? $gettext("Saved changes and sent a reset link to %{name}", {
+                  name: userDisplayName(details),
+              })
+            : $gettext("Saved changes to %{name}", {
+                  name: userDisplayName(details),
+              }),
+    );
+}
+
+async function setActive(user: User, isActive: boolean): Promise<void> {
+    try {
+        applyUserDetails(await updateUser(user.id, { is_active: isActive }));
+        toastSuccess(
+            isActive
+                ? $gettext("%{name} activated", { name: userDisplayName(user) })
+                : $gettext("%{name} deactivated", {
+                      name: userDisplayName(user),
+                  }),
+        );
+        return;
+    } catch (error) {
+        showError($gettext("Unable to update the account"), error);
+    }
+}
+
+function canManage(user: User): boolean {
+    return user.id !== currentUserId.value && !user.is_public;
+}
+
+function canDelete(user: User): boolean {
+    return canManage(user) && !user.is_superuser;
+}
+
+async function promptDelete(user: User): Promise<void> {
+    deleteDetails.value = null;
+    deleteTarget.value = user;
+    try {
+        const details = await fetchUserDetails(user.id);
+        if (deleteTarget.value?.id === user.id) {
+            deleteDetails.value = details;
+        }
+    } catch (error) {
+        deleteTarget.value = null;
+        showError($gettext("Unable to load user details"), error);
+    }
+}
+
+async function confirmDelete(user: User): Promise<void> {
+    isDeleting.value = true;
+    try {
+        await deleteUser(user.id);
+        users.value = users.value.filter((other) => other.id !== user.id);
+        checkedIds.value = checkedIds.value.filter((id) => id !== user.id);
+        if (activeId.value === user.id) {
+            activeId.value = null;
+            closeUserForm();
+        }
+        deleteTarget.value = null;
+        toastSuccess(
+            $gettext("%{name} deleted", { name: userDisplayName(user) }),
+        );
+    } catch (error) {
+        if (error instanceof ApiError && error.code === "history") {
+            deleteDetails.value = deleteDetails.value && {
+                ...deleteDetails.value,
+                can_delete: false,
+                delete_block_code: "history",
+                delete_block_reason: error.message,
+            };
+        } else {
+            showError($gettext("Unable to delete the account"), error);
+        }
+    } finally {
+        isDeleting.value = false;
+    }
+}
+
+async function deactivateFromDelete(user: User): Promise<void> {
+    await setActive(user, false);
+    deleteTarget.value = null;
 }
 
 async function apply(add: number[], remove: number[]): Promise<void> {
@@ -202,7 +374,10 @@ watchEffect(loadActiveUserDetails);
 
 async function loadUsers(): Promise<void> {
     try {
-        users.value = await fetchUsers();
+        const directory = await fetchUsers();
+        users.value = directory.users;
+        inviteExpiryHours.value = directory.invite_expiry_hours;
+        currentUserId.value = directory.current_user_id;
     } catch (error) {
         showError($gettext("Unable to load users"), error);
     } finally {
@@ -231,7 +406,7 @@ async function loadActiveUserDetails(): Promise<void> {
 <template>
     <div
         class="membership-columns"
-        :class="{ 'with-editor': editedUsers.length > 0 }"
+        :class="{ 'with-editor': isUserFormOpen || editedUsers.length > 0 }"
     >
         <section
             class="column"
@@ -355,10 +530,10 @@ async function loadActiveUserDetails(): Promise<void> {
                     :aria-label="$gettext('Filter users')"
                 />
                 <Button
-                    v-if="ADD_USER_ENABLED"
                     icon="pi pi-plus"
                     :label="$gettext('Add User')"
-                    @click="showAddUsers = true"
+                    :disabled="isCreatingUser"
+                    @click="startNewUser"
                 />
             </header>
             <div
@@ -501,13 +676,52 @@ async function loadActiveUserDetails(): Promise<void> {
                                 </span>
                             </span>
                         </button>
+                        <button
+                            v-if="canDelete(user)"
+                            type="button"
+                            class="row-delete"
+                            :title="$gettext('Delete account')"
+                            :aria-label="
+                                $gettext('Delete %{name}', {
+                                    name: userDisplayName(user),
+                                })
+                            "
+                            @click="promptDelete(user)"
+                        >
+                            <i
+                                class="pi pi-trash"
+                                aria-hidden="true"
+                            ></i>
+                        </button>
                     </li>
                 </ul>
             </div>
         </section>
 
         <section
-            v-if="editedUsers.length > 0"
+            v-if="isUserFormOpen"
+            class="column editor-column"
+            :aria-label="
+                isCreatingUser
+                    ? $gettext('New Account')
+                    : $gettext('Edit Account')
+            "
+        >
+            <UserForm
+                :key="isEditingUser ? activeUserDetails?.id : 'new'"
+                v-model:dirty="isUserFormDirty"
+                :user="
+                    isEditingUser ? activeUserDetails ?? undefined : undefined
+                "
+                :users="users"
+                :invite-expiry-hours="inviteExpiryHours"
+                @cancel="guardUserForm(closeUserForm)"
+                @created="onUserCreated"
+                @updated="onUserUpdated"
+            />
+        </section>
+        <section
+            v-else-if="editedUsers.length > 0"
             class="column editor-column"
             :aria-label="$gettext('Group Membership')"
         >
@@ -548,19 +762,6 @@ async function loadActiveUserDetails(): Promise<void> {
                                     <GroupTags
                                         :is-public="activeUser.is_public"
                                     />
-                                    <span
-                                        class="status-badge"
-                                        :class="{
-                                            'status-active':
-                                                activeUser.is_active,
-                                        }"
-                                    >
-                                        {{
-                                            activeUser.is_active
-                                                ? $gettext("Active")
-                                                : $gettext("Inactive")
-                                        }}
-                                    </span>
                                 </span>
                                 <span
                                     v-if="activeUser.is_superuser"
@@ -568,38 +769,85 @@ async function loadActiveUserDetails(): Promise<void> {
                                     >{{ $gettext("Superuser") }}</span
                                 >
                             </div>
-                        </div>
-                        <dl class="dates">
-                            <div>
-                                <dt>{{ $gettext("Created") }}</dt>
-                                <dd>
-                                    {{
-                                        activeUserDetails
-                                            ? formatDate(
-                                                  activeUserDetails.date_joined,
-                                              )
-                                            : PENDING_VALUE
-                                    }}
-                                </dd>
-                            </div>
-                            <span
-                                class="dot"
-                                aria-hidden="true"
-                                >·</span
+                            <label
+                                class="status-toggle"
+                                for="abac-user-active"
                             >
-                            <div>
-                                <dt>{{ $gettext("Last Login") }}</dt>
-                                <dd>
-                                    {{
-                                        activeUserDetails
-                                            ? formatDate(
-                                                  activeUserDetails.last_login,
-                                              )
-                                            : PENDING_VALUE
-                                    }}
-                                </dd>
+                                <ToggleSwitch
+                                    input-id="abac-user-active"
+                                    :model-value="activeUser.is_active"
+                                    :disabled="!canManage(activeUser)"
+                                    @update:model-value="
+                                        setActive(activeUser, $event)
+                                    "
+                                />
+                                {{
+                                    activeUser.is_active
+                                        ? $gettext("Active")
+                                        : $gettext("Inactive")
+                                }}
+                            </label>
+                        </div>
+                        <div class="hero-meta">
+                            <dl class="dates">
+                                <div>
+                                    <dt>{{ $gettext("Created") }}</dt>
+                                    <dd>
+                                        {{
+                                            activeUserDetails
+                                                ? formatDate(
+                                                      activeUserDetails.date_joined,
+                                                  )
+                                                : PENDING_VALUE
+                                        }}
+                                    </dd>
+                                </div>
+                                <span
+                                    class="dot"
+                                    aria-hidden="true"
+                                    >·</span
+                                >
+                                <div>
+                                    <dt>{{ $gettext("Last Login") }}</dt>
+                                    <dd>
+                                        {{
+                                            activeUserDetails
+                                                ? formatDate(
+                                                      activeUserDetails.last_login,
+                                                  )
+                                                : PENDING_VALUE
+                                        }}
+                                    </dd>
+                                </div>
+                            </dl>
+                            <div class="hero-actions">
+                                <button
+                                    v-if="canDelete(activeUser)"
+                                    type="button"
+                                    class="action-link danger"
+                                    @click="promptDelete(activeUser)"
+                                >
+                                    <i
+                                        class="pi pi-trash"
+                                        aria-hidden="true"
+                                    ></i>
+                                    {{ $gettext("Delete account") }}
+                                </button>
+                                <button
+                                    v-if="!activeUser.is_public"
+                                    type="button"
+                                    class="action-link"
+                                    :disabled="!activeUserDetails"
+                                    @click="startEditUser"
+                                >
+                                    <i
+                                        class="pi pi-pencil"
+                                        aria-hidden="true"
+                                    ></i>
+                                    {{ $gettext("Edit account") }}
+                                </button>
                             </div>
-                        </dl>
+                        </div>
                     </div>
                 </template>
                 <div class="editor-body">
@@ -727,15 +975,14 @@ async function loadActiveUserDetails(): Promise<void> {
                 </div>
             </div>
         </section>
-        <AddUsersDialog
-            v-if="ADD_USER_ENABLED"
-            v-model:visible="showAddUsers"
-            :groups="groups"
-            :users="users"
-            :initial-group-id="
-                typeof groupFilter === 'number' ? groupFilter : null
-            "
-            @updated="mergeUsers"
+        <DeleteUserDialog
+            :user="deleteTarget"
+            :details="deleteDetails"
+            :group-names="deleteTarget ? groupNames(deleteTarget) : []"
+            :is-deleting="isDeleting"
+            @close="deleteTarget = null"
+            @delete="confirmDelete"
+            @deactivate="deactivateFromDelete"
         />
     </div>
 </template>
@@ -1052,6 +1299,69 @@ async function loadActiveUserDetails(): Promise<void> {
     color: var(--p-abac-accent);
     font-size: 1.8rem;
     font-weight: 700;
+}
+
+.status-toggle {
+    display: flex;
+    align-items: center;
+    gap: 0.8rem;
+    margin-inline-start: auto;
+    font-size: 1.25rem;
+    cursor: pointer;
+}
+
+.hero-meta {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 1rem;
+}
+
+.hero-actions {
+    display: flex;
+    align-items: center;
+    gap: 0.4rem;
+    margin-inline-start: auto;
+}
+
+.action-link {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.5rem;
+    padding: 0.2rem 0.6rem;
+    border: 0.1rem solid transparent;
+    border-radius: 0.4rem;
+    background: none;
+    color: var(--p-abac-accent);
+    font: inherit;
+    font-size: 1.2rem;
+    font-weight: 600;
+    cursor: pointer;
+}
+
+.action-link.danger {
+    color: var(--p-abac-danger);
+}
+
+.action-link:hover:not(:disabled) {
+    background: var(--p-abac-accent-subtle);
+}
+
+.action-link.danger:hover:not(:disabled) {
+    background: var(--p-abac-danger-tint);
+}
+
+.action-link:disabled {
+    opacity: 0.5;
+    cursor: default;
+}
+
+.action-link .pi {
+    font-size: 1rem;
+}
+
+.user-row .row-delete {
+    margin-block-start: 1.1rem;
 }
 
 .hero-text {

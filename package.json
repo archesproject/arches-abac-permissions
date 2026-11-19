@@ -18,7 +18,8 @@
         "vitest": "vitest --run --coverage"
     },
     "dependencies": {
-        "arches": "github:archesproject/arches#v8.2.0-alpha.23"
+        "arches": "github:archesproject/arches#v8.2.0-alpha.23",
+        "libphonenumber-js": "^1.13.17"
     },
     "nodeModulesPaths": {},
     "overrides": {

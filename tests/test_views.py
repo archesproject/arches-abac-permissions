@@ -1,12 +1,24 @@
 import json
 import uuid
 from unittest import skipIf, skipUnless
+from unittest.mock import patch
 
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission, User
+from django.contrib.auth.tokens import default_token_generator
+from django.core import mail
 from django.test import TestCase
 from django.urls import reverse
+from django.utils.encoding import force_str
+from django.utils.http import urlsafe_base64_decode
 
+from arches.app.models.models import (
+    ETLModule,
+    GraphXPublishedGraph,
+    LoadEvent,
+    UserProfile,
+)
+from arches_abac_permissions.rule_types import ANONYMOUS_USERNAME
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from tests.test_inclusion_rules import LifecycleTestCase, make_rule
 
@@ -328,6 +340,253 @@ class MembershipApiTests(ApiTestCase):
         self.assertNotIn("password", response.json())
         missing = reverse("abac_user", args=[999999])
         self.assertEqual(self.send("get", missing).status_code, 404)
+
+    def new_user_payload(self, **overrides):
+        body = {
+            "first_name": "Ada",
+            "last_name": "Lovelace",
+            "email": "ada@example.org",
+            "username": "Ada.L",
+            "phone": "+1 650-253-0000",
+        }
+        body.update(overrides)
+        return body
+
+    def post_user(self, **overrides):
+        return self.send(
+            "post", reverse("abac_users"), self.new_user_payload(**overrides)
+        )
+
+    def test_create_user_sends_invite(self):
+        response = self.post_user()
+        self.assertEqual(response.status_code, 201, response.content)
+        self.assertEqual(response.json()["username"], "ada.l")
+        user = User.objects.get(username="ada.l")
+        self.assertFalse(user.has_usable_password())
+        self.assertEqual(user.userprofile.phone, "+16502530000")
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["ada@example.org"])
+        reset_path = mail.outbox[0].body.split("http://testserver")[1].split()[0]
+        uidb64, token = reset_path.strip("/").split("/")[-2:]
+        self.assertEqual(int(force_str(urlsafe_base64_decode(uidb64))), user.pk)
+        self.assertTrue(default_token_generator.check_token(user, token))
+
+    def test_create_user_without_phone(self):
+        self.assertEqual(self.post_user(phone="").status_code, 201)
+        self.assertEqual(UserProfile.objects.get(user__username="ada.l").phone, "")
+
+    def test_create_user_rejects_duplicates_case_insensitively(self):
+        self.user.email = "Plain@Example.org"
+        self.user.save()
+        response = self.post_user(username="PLAIN", email="plain@example.ORG")
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(set(response.json()["errors"]), {"username", "email"})
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_create_user_rejects_invalid_fields(self):
+        cases = {
+            "first_name": " ",
+            "last_name": "",
+            "email": "not-an-email",
+            "username": "a b",
+            "phone": "+1 123",
+        }
+        for field, value in cases.items():
+            response = self.post_user(**{field: value})
+            self.assertEqual(response.status_code, 400, field)
+            self.assertEqual(set(response.json()["errors"]), {field}, field)
+        # A landline is not accepted; neither is a number without a country code.
+        for phone in ("+44 20 7946 0958", "650 253 0000"):
+            self.assertEqual(self.post_user(phone=phone).status_code, 400, phone)
+        self.assertFalse(User.objects.filter(username="ada.l").exists())
+
+    def test_create_user_rejects_overlong_fields(self):
+        for field in ("first_name", "last_name", "email"):
+            value = "x" * 300 + ("@example.org" if field == "email" else "")
+            response = self.post_user(**{field: value})
+            self.assertEqual(response.status_code, 400, field)
+            self.assertEqual(set(response.json()["errors"]), {field}, field)
+
+    def test_create_user_rolls_back_when_email_fails(self):
+        with patch(
+            "arches_abac_permissions.membership_views.EmailMultiAlternatives.send",
+            side_effect=OSError("smtp down"),
+        ):
+            response = self.post_user()
+        self.assertEqual(response.status_code, 500)
+        self.assertFalse(User.objects.filter(username="ada.l").exists())
+        self.assertFalse(UserProfile.objects.filter(phone="+16502530000").exists())
+
+    def make_user(self, **overrides):
+        fields = {
+            "username": "target",
+            "email": "t@example.org",
+            "first_name": "Tia",
+            "last_name": "Target",
+            **overrides,
+        }
+        user = User.objects.create_user(password="pw", **fields)
+        UserProfile.objects.update_or_create(
+            user=user, defaults={"phone": "+16502530000"}
+        )
+        return user
+
+    def patch_user(self, user, **body):
+        return self.send("patch", reverse("abac_user", args=[user.pk]), body)
+
+    def test_edit_keeps_unchanged_legacy_username_and_phone(self):
+        target = self.make_user(username="Jane@X.org")
+        UserProfile.objects.filter(user=target).update(phone="555-1234")
+        body = dict(
+            first_name="Janet",
+            last_name="Target",
+            email="t@example.org",
+            username="Jane@X.org",
+            phone="555-1234",
+        )
+        self.assertEqual(self.patch_user(target, **body).status_code, 200)
+        target.refresh_from_db()
+        self.assertEqual(
+            (target.username, target.first_name, target.userprofile.phone),
+            ("Jane@X.org", "Janet", "555-1234"),
+        )
+        for field, value in (("username", "Bad Name!"), ("phone", "555-12")):
+            response = self.patch_user(target, **{**body, field: value})
+            self.assertEqual(response.status_code, 400)
+            self.assertIn(field, response.json()["errors"])
+
+    def test_public_user_cannot_be_edited_or_reset(self):
+        public = User.objects.get(username=ANONYMOUS_USERNAME)
+        for body in (
+            {"username": "renamed"},
+            {"first_name": "X"},
+            {"password_action": "reset"},
+        ):
+            self.assertEqual(self.patch_user(public, **body).status_code, 400)
+        public.refresh_from_db()
+        self.assertEqual(public.username, ANONYMOUS_USERNAME)
+        self.assertEqual(self.patch_user(public, is_active=True).status_code, 200)
+
+    def test_details_include_phone_and_delete_state(self):
+        target = self.make_user()
+        details = self.send("get", reverse("abac_user", args=[target.pk])).json()
+        self.assertEqual(details["phone"], "+16502530000")
+        self.assertTrue(details["can_delete"])
+        own = self.send("get", reverse("abac_user", args=[self.superuser.pk])).json()
+        self.assertEqual((own["can_delete"], own["delete_block_code"]), (False, "self"))
+        users = self.send("get", reverse("abac_users")).json()
+        self.assertEqual(users["current_user_id"], self.superuser.pk)
+
+    def test_edit_user_keeps_password_and_allows_own_values(self):
+        target = self.make_user()
+        response = self.patch_user(
+            target,
+            first_name="Tess",
+            last_name="Target",
+            email="T@example.org",
+            username="TARGET",
+            phone="",
+        )
+        self.assertEqual(response.status_code, 200, response.content)
+        target.refresh_from_db()
+        self.assertEqual((target.first_name, target.email), ("Tess", "T@example.org"))
+        self.assertTrue(target.has_usable_password())
+        self.assertEqual(target.userprofile.phone, "")
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_edit_user_sends_reset_link(self):
+        target = self.make_user()
+        response = self.patch_user(target, password_action="reset")
+        self.assertEqual(response.status_code, 200, response.content)
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ["t@example.org"])
+        reset_path = mail.outbox[0].body.split("http://testserver")[1].split()[0]
+        uidb64, token = reset_path.strip("/").split("/")[-2:]
+        self.assertEqual(int(force_str(urlsafe_base64_decode(uidb64))), target.pk)
+        self.assertTrue(default_token_generator.check_token(target, token))
+        self.assertTrue(target.has_usable_password())
+
+    def test_edit_user_validation(self):
+        target = self.make_user()
+        self.make_user(username="other", email="o@example.org")
+        for body, field in (
+            ({"email": "O@example.org"}, "email"),
+            ({"username": "OTHER"}, "username"),
+            ({"username": "no"}, "username"),
+            ({"first_name": " "}, "first_name"),
+            ({"phone": "+1 123"}, "phone"),
+        ):
+            response = self.patch_user(target, **body)
+            self.assertEqual(response.status_code, 400, body)
+            self.assertEqual(set(response.json()["errors"]), {field}, body)
+        self.assertEqual(self.patch_user(target, password_action="x").status_code, 400)
+        self.assertEqual(self.patch_user(target, is_active="no").status_code, 400)
+
+    def test_edit_user_rolls_back_when_reset_email_fails(self):
+        target = self.make_user()
+        with patch(
+            "arches_abac_permissions.membership_views.EmailMultiAlternatives.send",
+            side_effect=OSError("smtp down"),
+        ):
+            response = self.patch_user(
+                target, first_name="Changed", password_action="reset"
+            )
+        self.assertEqual(response.status_code, 500)
+        target.refresh_from_db()
+        self.assertEqual(target.first_name, "Tia")
+
+    def test_toggle_active(self):
+        target = self.make_user()
+        self.assertFalse(self.patch_user(target, is_active=False).json()["is_active"])
+        target.refresh_from_db()
+        self.assertFalse(target.is_active)
+        self.assertTrue(self.patch_user(target, is_active=True).json()["is_active"])
+
+    def test_cannot_deactivate_self_or_public_user(self):
+        public = User.objects.get(username=ANONYMOUS_USERNAME)
+        for user in (self.superuser, public):
+            self.assertEqual(self.patch_user(user, is_active=False).status_code, 400)
+            user.refresh_from_db()
+            self.assertTrue(user.is_active)
+
+    def test_delete_user(self):
+        target = self.make_user()
+        response = self.send("delete", reverse("abac_user", args=[target.pk]))
+        self.assertEqual(response.status_code, 204)
+        self.assertFalse(User.objects.filter(pk=target.pk).exists())
+        self.assertFalse(UserProfile.objects.filter(phone="+16502530000").exists())
+
+    def test_delete_refused(self):
+        public = User.objects.get(username=ANONYMOUS_USERNAME)
+        other_admin = self.make_user(username="admin2", is_superuser=True)
+        for user in (self.superuser, public, other_admin):
+            response = self.send("delete", reverse("abac_user", args=[user.pk]))
+            self.assertEqual(response.status_code, 400)
+            self.assertTrue(User.objects.filter(pk=user.pk).exists())
+
+    def test_delete_refused_for_history_owners(self):
+        publisher = self.make_user(username="publisher", email="p@example.org")
+        GraphXPublishedGraph.objects.create(graph=self.graph, user=publisher)
+        loader = self.make_user(username="loader", email="l@example.org")
+        module = ETLModule.objects.create(
+            name="m", icon="i", etl_type="import", component="c", componentname="c"
+        )
+        LoadEvent.objects.create(user=loader, etl_module=module)
+        for user in (publisher, loader):
+            url = reverse("abac_user", args=[user.pk])
+            response = self.send("delete", url)
+            self.assertEqual(response.status_code, 409)
+            self.assertEqual(response.json()["code"], "history")
+            self.assertTrue(User.objects.filter(pk=user.pk).exists())
+            self.assertFalse(self.send("get", url).json()["can_delete"])
+
+    def test_user_management_requires_superuser(self):
+        target = self.make_user()
+        self.client.force_login(self.user)
+        url = reverse("abac_user", args=[target.pk])
+        for method in ("patch", "delete"):
+            self.assertEqual(self.send(method, url, {}).status_code, 403)
+        self.assertTrue(User.objects.filter(pk=target.pk).exists())
 
     def test_bulk_add_and_remove(self):
         other = Group.objects.create(name="Other")
