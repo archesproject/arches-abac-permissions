@@ -164,6 +164,28 @@ class RuleApiTests(ApiTestCase):
             [(rule["id"], False, "The search no longer runs.")],
         )
 
+    def test_combined_rule_round_trip(self):
+        part = self.create_rule()
+        combined = {"operator": "or", "rule_ids": [part["id"]]}
+        created = self.create_rule(rule_type="combined", definition=combined)
+        self.assertEqual(
+            created["definition"], {**combined, "groups": [], "exclude_rule_ids": []}
+        )
+        url = reverse("abac_rule", args=[created["id"]])
+        including_itself = {"operator": "or", "rule_ids": [created["id"]]}
+        response = self.send(
+            "put",
+            url,
+            self.payload(rule_type="combined", definition=including_itself),
+        )
+        self.assertEqual(response.status_code, 400)
+        self.assertIn("cannot include itself", response.json()["message"])
+        malformed = {"operator": "and", "rule_ids": [part["id"]], "groups": [["x"]]}
+        response = self.send(
+            "put", url, self.payload(rule_type="combined", definition=malformed)
+        )
+        self.assertEqual(response.status_code, 400)
+
     def test_update_replaces_grants(self):
         other = Group.objects.create(name="Other")
         created = self.create_rule()
