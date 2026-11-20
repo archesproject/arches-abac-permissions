@@ -74,6 +74,9 @@ class TileNodeValueRule(InclusionRule):
 
     nodegroupid and datatype are derived from the node when the rule is
     validated (never taken from clients), so evaluation needs no node lookup.
+    Matching only reads the stored values. If the node later moves to another
+    nodegroup or changes datatype (e.g. after graph changes), the rule matches
+    nothing until it is edited and saved again.
 
     Matching is exact. List-valued nodes (domain-value-list,
     resource-instance(-list), reference) match when they contain the value.
@@ -84,7 +87,8 @@ class TileNodeValueRule(InclusionRule):
         key="tile_node_value",
         label=gettext_lazy("Resource has Node Value"),
         description=gettext_lazy(
-            "Matches resources with a tile whose node holds a value"
+            "Matches resources with a tile whose node holds a value. "
+            "Re-save the rule after changing the node's graph."
         ),
         icon="pi pi-tag",
         definition_keys=("graphid", "nodeid", "value", "language"),
@@ -96,32 +100,27 @@ class TileNodeValueRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        args = cls.find_args(inclusion_rule.definition)
-        if args is None:
+        args = cls.read_args(inclusion_rule.definition)
+        tiles = args and cls.get_tiles(args)
+        if tiles is None:
             return ResourceInstance.objects.none()
-        tiles = TileModel.objects.filter(
-            cls.get_value_filter(args),
-            nodegroup_id=args.nodegroup_id,
-            resourceinstance__graph_id=args.graph_id,
-        )
         return ResourceInstance.objects.filter(
-            pk__in=tiles.values("resourceinstance_id")
+            pk__in=tiles.filter(resourceinstance__graph_id=args.graph_id).values(
+                "resourceinstance_id"
+            )
         )
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        args = cls.find_args(inclusion_rule.definition)
+        args = cls.read_args(inclusion_rule.definition)
         if args is None or resource.graph_id != args.graph_id:
             return False
-        return TileModel.objects.filter(
-            cls.get_value_filter(args),
-            nodegroup_id=args.nodegroup_id,
-            resourceinstance=resource,
-        ).exists()
+        tiles = cls.get_tiles(args)
+        return tiles is not None and tiles.filter(resourceinstance=resource).exists()
 
     @classmethod
     def validate_definition(cls, inclusion_rule):
-        """Check the rule against the database and store the node's server-derived keys."""
+        """Validate the rule and store its normalized and server-derived values."""
         definition = inclusion_rule.definition
         graphid, nodeid, _value = cls.require_keys(definition)
         node = get_resource_node(graphid, nodeid)
@@ -129,7 +128,11 @@ class TileNodeValueRule(InclusionRule):
         definition["datatype"] = node.datatype
         args = cls.get_args(definition)
         cls.validate_value(node, args.value, args.language)
-        definition["value"] = args.value
+        definition.update(
+            graphid=str(args.graph_id), nodeid=str(args.node_id), value=args.value
+        )
+        if "language" in definition:
+            definition["language"] = args.language
 
     @classmethod
     def get_index_sql(cls, inclusion_rule):
@@ -147,17 +150,38 @@ class TileNodeValueRule(InclusionRule):
             f"    WHERE nodegroupid = '{node.nodegroup_id}';"
         )
 
+    @staticmethod
+    def read_args(definition):
+        """
+        Read the values validate_definition stored, without validating them.
+        None if they're missing or malformed, so the rule matches nothing.
+        """
+        try:
+            return TileArgs(
+                uuid.UUID(str(definition["graphid"])),
+                uuid.UUID(str(definition["nodeid"])),
+                uuid.UUID(str(definition["nodegroupid"])),
+                definition["datatype"],
+                definition["value"],
+                definition.get("language") or "",
+            )
+        except (KeyError, ValueError, TypeError):
+            return None
+
     @classmethod
-    def get_value_filter(cls, args):
-        """Return a Q matching tiles whose node holds the value."""
+    def get_tiles(cls, args):
+        """Return the tiles whose node holds the value, or None if it's malformed."""
         lookup = f"data__{args.node_id}__contains"
         value_filter = Q()
-        for fragment in cls.get_fragments(args):
-            value_filter |= Q(**{lookup: fragment})
+        try:
+            for fragment in cls.get_fragments(args):
+                value_filter |= Q(**{lookup: fragment})
+        except (KeyError, ValueError, TypeError):
+            return None
         if not value_filter:
             # A string rule for "any language" with no languages matches nothing.
             value_filter = Q(pk__in=[])
-        return value_filter
+        return TileModel.objects.filter(value_filter, nodegroup_id=args.nodegroup_id)
 
     @staticmethod
     def get_fragments(args):
@@ -172,20 +196,23 @@ class TileNodeValueRule(InclusionRule):
                 )
                 return [{code: {"value": value}} for code in codes]
             case "number":
-                number = Decimal(value)
-                return [
-                    int(number) if number == number.to_integral() else float(number)
-                ]
+                # Stored in canonical form: an integer, or a float.
+                try:
+                    return [int(value)]
+                except ValueError:
+                    return [float(value)]
             case "boolean":
-                return [value == "true"]
+                return [{"true": True, "false": False}[value]]
             case "domain-value-list":
                 return [[value]]
             case "resource-instance" | "resource-instance-list":
                 return [[{"resourceId": value}]]
             case "reference":
                 return [[{"labels": [{"list_item_id": value}]}]]
-            case _:
+            case "non-localized-string" | "date" | "domain-value":
                 return [value]
+            case _:
+                raise ValueError(args.datatype)
 
     @staticmethod
     def require_keys(definition):
@@ -201,16 +228,8 @@ class TileNodeValueRule(InclusionRule):
         return graphid, nodeid, value
 
     @classmethod
-    def find_args(cls, definition):
-        """Like get_args, but None for a malformed definition (it matches nothing)."""
-        try:
-            return cls.get_args(definition)
-        except ValidationError:
-            return None
-
-    @classmethod
     def get_args(cls, definition):
-        """Parse the definition without database access."""
+        """Validate the definition without database access; return its parsed values."""
         graphid, nodeid, value = cls.require_keys(definition)
         datatype = definition.get("datatype")
         value = str(value)
@@ -230,14 +249,15 @@ class TileNodeValueRule(InclusionRule):
                     raise InvalidOperation
             except InvalidOperation:
                 raise ValidationError(_("%s is not a number.") % value)
-            # Non-integers are matched as floats; reject any that would round.
-            if (
-                number != number.to_integral()
-                and Decimal(repr(float(number))) != number
-            ):
-                raise ValidationError(
-                    _("%s has more precision than can be matched.") % value
-                )
+            if number == number.to_integral():
+                value = str(int(number))
+            else:
+                # Non-integers are matched as floats; reject any that would round.
+                if Decimal(repr(float(number))) != number:
+                    raise ValidationError(
+                        _("%s has more precision than can be matched.") % value
+                    )
+                value = repr(float(number))
         elif datatype == "boolean" and value not in ("true", "false"):
             raise ValidationError(_("A boolean value must be 'true' or 'false'."))
         return TileArgs(

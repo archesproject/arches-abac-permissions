@@ -1,4 +1,5 @@
 import uuid
+from decimal import Decimal, InvalidOperation
 
 from django.core.exceptions import ValidationError
 from django.db import migrations
@@ -14,6 +15,21 @@ def tile_rules(apps):
     return InclusionRule.objects.filter(modulename=MODULENAME, classname=CLASSNAME)
 
 
+def normalize_value(datatype, value):
+    """Canonical form matching reads; a malformed value is left as is."""
+    try:
+        if datatype in UUID_DATATYPES:
+            return str(uuid.UUID(str(value)))
+        if datatype == "number":
+            number = Decimal(str(value))
+            if number == number.to_integral():
+                return str(int(number))
+            return repr(float(number))
+    except (ValueError, InvalidOperation, OverflowError):
+        pass
+    return value
+
+
 def store_node_keys(apps, schema_editor):
     Node = apps.get_model("models", "Node")
     for rule in tile_rules(apps):
@@ -26,11 +42,9 @@ def store_node_keys(apps, schema_editor):
             continue
         definition["nodegroupid"] = str(node.nodegroup_id)
         definition["datatype"] = node.datatype
-        if node.datatype in UUID_DATATYPES:
-            try:
-                definition["value"] = str(uuid.UUID(str(definition.get("value"))))
-            except ValueError:
-                pass
+        definition["graphid"] = str(node.graph_id)
+        definition["nodeid"] = str(node.pk)
+        definition["value"] = normalize_value(node.datatype, definition.get("value"))
         rule.save(update_fields=["definition"])
 
 

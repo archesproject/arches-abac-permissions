@@ -91,7 +91,10 @@ class SpatialRule(InclusionRule):
 
     @classmethod
     def get_matching_resources(cls, inclusion_rule):
-        _graph_id, node_id, area, operator = cls.get_args(inclusion_rule.definition)
+        args = cls.read_args(inclusion_rule.definition)
+        if args is None:
+            return ResourceInstance.objects.none()
+        _graph_id, node_id, area, operator = args
         return ResourceInstance.objects.filter(
             pk__in=cls.matching_geometries(node_id, area, operator).values(
                 "resourceinstance_id"
@@ -100,9 +103,10 @@ class SpatialRule(InclusionRule):
 
     @classmethod
     def matches_resource(cls, inclusion_rule, resource):
-        graph_id, node_id, area, operator = cls.get_args(inclusion_rule.definition)
-        if resource.graph_id != graph_id:
+        args = cls.read_args(inclusion_rule.definition)
+        if args is None or resource.graph_id != args[0]:
             return False
+        _graph_id, node_id, area, operator = args
         return (
             cls.matching_geometries(node_id, area, operator)
             .filter(resourceinstance=resource)
@@ -139,11 +143,24 @@ class SpatialRule(InclusionRule):
 
     @classmethod
     def validate_definition(cls, inclusion_rule):
-        cls.parse_definition(inclusion_rule.definition)
+        """Validate the rule and store its normalized values, which matching reads."""
+        definition = inclusion_rule.definition
+        node, _area, operator = cls.parse_definition(definition)
+        definition.update(
+            graphid=str(node.graph_id),
+            nodeid=str(node.pk),
+            operator=operator,
+            geometry=strip_geometry(definition["geometry"]),
+        )
+        if definition.get("buffer") is not None:
+            definition["buffer"] = validate_buffer(definition["buffer"])
 
     @classmethod
     def get_index_sql(cls, inclusion_rule):
-        node, _area, _operator = cls.parse_definition(inclusion_rule.definition)
+        definition = inclusion_rule.definition
+        node = get_resource_node(definition.get("graphid"), definition.get("nodeid"))
+        if node.datatype != GEOMETRY_DATATYPE:
+            raise ValidationError(_("The node must be a geometry node."))
         # Ids come from the database, so formatting them into SQL is safe.
         return (
             f"CREATE INDEX CONCURRENTLY IF NOT EXISTS abac_geom_node_{node.pk.hex}\n"
@@ -152,8 +169,31 @@ class SpatialRule(InclusionRule):
         )
 
     @classmethod
+    def read_args(cls, definition):
+        """
+        Read the values validate_definition stored, without validating them.
+        None if they're missing or malformed, so the rule matches nothing.
+        """
+        try:
+            operator = definition["operator"]
+            if operator not in OPERATORS:
+                raise ValueError(operator)
+            area = build_area(
+                json.dumps(strip_geometry(definition["geometry"]), sort_keys=True),
+                float(definition.get("buffer") or 0),
+            )
+            return (
+                uuid.UUID(str(definition["graphid"])),
+                uuid.UUID(str(definition["nodeid"])),
+                area,
+                operator,
+            )
+        except (KeyError, ValueError, TypeError, GEOSException, GDALException):
+            return None
+
+    @classmethod
     def get_args(cls, definition):
-        """Return the graph id, node id, area and operator without database access."""
+        """Validate the definition without database access; return its parsed values."""
         graphid = definition.get("graphid")
         nodeid = definition.get("nodeid")
         geometry = definition.get("geometry")
@@ -215,8 +255,9 @@ class SpatialRule(InclusionRule):
             canonical = json.dumps(strip_geometry(geometry), sort_keys=True)
         except (ValueError, TypeError):
             raise ValidationError(_("The area is not valid GeoJSON."))
+        parse_area(canonical, buffer)
         # Copied so callers can't change the cached area.
-        return parse_area(canonical, buffer).clone()
+        return build_area(canonical, buffer).clone()
 
     class Meta:
         proxy = True
@@ -296,12 +337,8 @@ def buffer_parts(parts, buffer):
     return area
 
 
-@lru_cache(maxsize=256)
 def parse_area(canonical_geojson, buffer=0):
-    """
-    Validate, buffer and union an area. Cached since every permission check
-    of a rule parses the same area.
-    """
+    """Validate an area and its buffer; run when a rule is saved."""
     try:
         area = GEOSGeometry(canonical_geojson, srid=4326)
     except (GEOSException, GDALException, ValueError, TypeError):
@@ -315,10 +352,17 @@ def parse_area(canonical_geojson, buffer=0):
                 _("The area is not a valid polygon: %s") % part.valid_reason
             )
     if buffer > 0:
-        area = buffer_parts(parts, buffer).unary_union
-        area.srid = 4326
-        check_bounds(area)
-        return area
-    if any(part.geom_type not in POLYGONAL_TYPES for part in parts):
+        check_bounds(build_area(canonical_geojson, buffer))
+    elif any(part.geom_type not in POLYGONAL_TYPES for part in parts):
         raise ValidationError(_("Points and lines need a buffer greater than 0."))
+
+
+@lru_cache(maxsize=256)
+def build_area(canonical_geojson, buffer=0):
+    """Build an area, buffered and unioned. Cached since every check of a rule uses it."""
+    area = GEOSGeometry(canonical_geojson, srid=4326)
+    if buffer > 0:
+        area = buffer_parts(simple_parts(area), buffer).unary_union
+        area.srid = 4326
+        return area
     return area.unary_union

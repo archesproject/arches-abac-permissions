@@ -263,6 +263,13 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
                 self.assertFalse(rule.matches_resource(self.hit))
                 self.assertEqual(list(rule.get_matching_resources()), [])
 
+    def test_matching_does_not_validate(self):
+        rule = self.make_value_rule("number", 5)
+        rule.definition["value"] = "abc"
+        with self.assertNumQueries(0):
+            self.assertFalse(rule.matches_resource(self.hit))
+            self.assertEqual(list(rule.get_matching_resources()), [])
+
     def test_migration_stores_keys(self):
         migration = import_module(
             "arches_abac_permissions.migrations.0007_tilenodevaluerule_nodegroup_datatype"
