@@ -67,6 +67,7 @@ class AccessTests(ApiTestCase):
             reverse("abac_languages"),
             reverse("abac_map_config"),
             reverse("abac_controlled_list_items", args=[uuid.uuid4()]),
+            reverse("abac_saved_searches"),
             reverse("abac_groups"),
             reverse("abac_group", args=[self.group.pk]),
             reverse("abac_users"),
@@ -251,6 +252,31 @@ class ReferenceDataApiTests(ApiTestCase):
     def test_elasticsearch_rule_type_needs_elasticsearch(self):
         types = self.client.get(reverse("abac_rule_types")).json()["rule_types"]
         self.assertNotIn("elasticsearch", [t["key"] for t in types])
+
+    def test_saved_searches(self):
+        def text(value):
+            return {"en": {"value": value, "direction": "ltr"}}
+
+        saved = [
+            {
+                "SEARCH_NAME": text("Castles"),
+                "SEARCH_DESCRIPTION": None,
+                "SEARCH_URL": text("/search?term-filter=castle"),
+            },
+            {
+                "SEARCH_NAME": {"cy": {"value": "Cestyll", "direction": "ltr"}},
+                "SEARCH_URL": None,
+            },
+        ]
+        with mock.patch.object(settings, "SAVED_SEARCHES", saved, create=True):
+            response = self.client.get(reverse("abac_saved_searches"))
+        self.assertEqual(
+            response.json()["saved_searches"],
+            [
+                {"name": "Castles", "url": "/search?term-filter=castle"},
+                {"name": "", "url": ""},
+            ],
+        )
 
     def test_resource_sets(self):
         response = self.client.get(reverse("abac_resource_sets"))

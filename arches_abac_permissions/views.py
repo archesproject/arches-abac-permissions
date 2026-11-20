@@ -332,6 +332,31 @@ class ResourceSetsView(SuperuserAPIView):
         return JSONResponse({"resource_sets": resource_sets})
 
 
+def get_tile_string(value):
+    if not value:
+        return ""
+    try:
+        localized = get_localized_value(value)
+    except Exception:
+        # Raised when the value has no string in a usable language.
+        return ""
+    return localized.get("value", "") if isinstance(localized, dict) else localized
+
+
+class SavedSearchesView(SuperuserAPIView):
+    """The saved searches set in system settings, shown on the search page."""
+
+    def get(self, request):
+        saved_searches = [
+            {
+                "name": get_tile_string(saved_search.get("SEARCH_NAME")),
+                "url": get_tile_string(saved_search.get("SEARCH_URL")),
+            }
+            for saved_search in settings.SAVED_SEARCHES
+        ]
+        return JSONResponse({"saved_searches": saved_searches})
+
+
 def get_groups_queryset():
     return Group.objects.annotate(
         member_count=Count("user", distinct=True),
