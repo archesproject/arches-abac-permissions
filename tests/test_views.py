@@ -105,7 +105,7 @@ class RuleApiTests(ApiTestCase):
         self.assertEqual([r["id"] for r in listed], [created["id"]])
 
     def test_list_excludes_unsupported_rule_types(self):
-        make_rule(modulename="search_rule.py", classname="SearchRule")
+        make_rule(modulename="no_checks_rule.py", classname="NoChecksRule")
         self.assertEqual(self.client.get(reverse("abac_rules")).json()["rules"], [])
 
     def test_rule_type_matches_module_and_class(self):
@@ -113,7 +113,7 @@ class RuleApiTests(ApiTestCase):
         self.assertEqual(self.client.get(reverse("abac_rules")).json()["rules"], [])
 
     def test_unsupported_rule_types_not_editable(self):
-        rule = make_rule(modulename="search_rule.py", classname="SearchRule")
+        rule = make_rule(modulename="no_checks_rule.py", classname="NoChecksRule")
         url = reverse("abac_rule", args=[rule.pk])
         self.assertEqual(self.send("get", url).status_code, 404)
         self.assertEqual(self.send("put", url, self.payload()).status_code, 404)
@@ -201,6 +201,8 @@ class ReferenceDataApiTests(ApiTestCase):
         expected = ["lifecycle_state"]
         if apps.is_installed("arches_resource_sets"):
             expected.append("resource_set")
+        if apps.is_installed("arches_search"):
+            expected.append("search")
         expected += ["spatial", "tile_node_value"]
         self.assertEqual([t["key"] for t in types], expected)
 
