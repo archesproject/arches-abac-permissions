@@ -1,4 +1,5 @@
 import uuid
+from functools import lru_cache
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
@@ -8,6 +9,12 @@ from django.utils.translation import gettext_lazy as _
 
 from arches.app.utils.module_importer import get_class_from_modulename
 from arches_abac_permissions.const import RuleExtensionType
+
+
+@lru_cache(maxsize=None)
+def get_rule_class(modulename, classname):
+    # The importer searches every app's rules folder on each call.
+    return get_class_from_modulename(modulename, classname, RuleExtensionType.RULES)
 
 
 class InclusionRule(models.Model):
@@ -26,9 +33,7 @@ class InclusionRule(models.Model):
     created = models.DateTimeField(auto_now_add=True)
 
     def get_class_module(self):
-        return get_class_from_modulename(
-            self.modulename, self.classname, RuleExtensionType.RULES
-        )
+        return get_rule_class(self.modulename, self.classname)
 
     @classmethod
     def clean_definition(cls, raw_definition, definition_keys):
