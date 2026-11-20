@@ -41,9 +41,11 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
     instance the rule matches. They are added in ``get_perms``, which drives
     the single-resource checks (``user_can_read_resource``,
     ``user_can_edit_resource``, ``user_can_delete_resource``,
-    ``has_group_perm``), and in ``filter_resource_queryset``, which drives
-    SQL-based search such as arches-search. Elasticsearch results are not yet
-    filtered by rules.
+    ``has_group_perm``), in ``filter_resource_queryset``, which drives
+    SQL-based search such as arches-search, and in ``get_filtered_instances``
+    (read access only), which drives map tiles, related resources and the geo
+    and resource listing APIs. Elasticsearch results are not yet filtered by
+    rules.
     """
 
     def __init__(self):
@@ -169,9 +171,24 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         allresources: bool = False,
         resources: list[str] | None = None,
     ):
-        # TODO: merge in resources granted via ABAC rules once implemented.
-        return super().get_filtered_instances(
+        """
+        Return (is_exclusive, resource ids) as the default-deny framework does,
+        adding the resources that inclusion rules let ``user`` read. When
+        ``resources`` is given, only rule matches among them are added.
+        """
+        is_exclusive, instances = super().get_filtered_instances(
             user, search_engine, allresources, resources
+        )
+        if user.is_superuser or not is_exclusive:
+            return is_exclusive, instances
+
+        abac_permitted = self.get_abac_resources(user, "models.view_resourceinstance")
+        if resources is not None:
+            abac_permitted = abac_permitted.filter(resourceinstanceid__in=resources)
+        abac_ids = [str(pk) for pk in abac_permitted.values_list("pk", flat=True)]
+        # dict.fromkeys de-duplicates while keeping the framework's order.
+        return is_exclusive, list(
+            dict.fromkeys([str(pk) for pk in instances] + abac_ids)
         )
 
     def get_permission_search_filter(self, user: User) -> Bool:
