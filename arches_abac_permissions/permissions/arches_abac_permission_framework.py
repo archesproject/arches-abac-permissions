@@ -25,8 +25,10 @@ from arches.app.models.models import ResourceInstance
 from arches.app.permissions.arches_default_deny import (
     ArchesDefaultDenyPermissionFramework,
 )
-from arches.app.search.elasticsearch_dsl_builder import Bool
+from arches.app.search.elasticsearch_dsl_builder import Bool, Query
+from arches.app.search.mappings import RESOURCES_INDEX
 from arches.app.search.search import SearchEngine
+from arches.app.search.search_engine_factory import SearchEngineFactory
 from arches_abac_permissions.nested_groups import inheritance_links, reachable
 
 logger = logging.getLogger(__name__)
@@ -102,22 +104,72 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         """
         from arches_abac_permissions.models import InclusionRuleGroupPermission
 
-        grants = (
+        grants = list(
             InclusionRuleGroupPermission.objects.filter(
                 group__in=self.get_groups(user_or_group), rule__active=True
             )
             .select_related("rule")
             .prefetch_related("permissions")
         )
+        es_evaluated = [
+            grant.rule
+            for grant in grants
+            if self.evaluate_rule(
+                grant.rule,
+                lambda r: getattr(r.get_class_module(), "evaluated_in_es", False),
+                default=False,
+            )
+        ]
+        matched_in_es = self.get_rules_matching_in_es(es_evaluated, obj)
         perms = set()
         for grant in grants:
             codenames = {permission.codename for permission in grant.permissions.all()}
             # Skip evaluating a rule that would grant nothing new.
-            if codenames - perms and self.evaluate_rule(
-                grant.rule, lambda r: r.matches_resource(obj), default=False
-            ):
+            if not codenames - perms:
+                continue
+            if matched_in_es is not None and grant.rule in es_evaluated:
+                matches = str(grant.rule.pk) in matched_in_es
+            else:
+                matches = self.evaluate_rule(
+                    grant.rule, lambda r: r.matches_resource(obj), default=False
+                )
+            if matches:
                 perms |= codenames
         return perms
+
+    def get_rules_matching_in_es(self, rules, obj: ResourceInstance) -> set[str] | None:
+        """
+        Return the ids of the ``rules`` that match ``obj`` in the search index,
+        in one request: each rule's filter is a named query. None when the
+        request fails, so the rules are checked one at a time instead.
+        """
+        named = []
+        for rule in rules:
+            search_filter = self.evaluate_rule(
+                rule, lambda r: r.get_search_filter_for_rule(), default=None
+            )
+            if search_filter is not None:
+                named.append(
+                    {"bool": {"filter": [search_filter.dsl], "_name": str(rule.pk)}}
+                )
+        if not named:
+            return set()
+        query = Query(SearchEngineFactory().create(), start=0, limit=1)
+        query.add_query(
+            {
+                "bool": {
+                    "filter": [{"ids": {"values": [str(obj.pk)]}}],
+                    "should": named,
+                    "minimum_should_match": 1,
+                }
+            }
+        )
+        try:
+            hits = query.search(index=RESOURCES_INDEX)["hits"]["hits"]
+        except Exception:
+            logger.warning("Search rules could not be checked together for %s.", obj.pk)
+            return None
+        return set(hits[0].get("matched_queries", [])) if hits else set()
 
     def get_granted_rules(self, user: User, permission: str):
         """
