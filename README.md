@@ -135,6 +135,7 @@ Things to be aware of:
 - **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser user.
 - **Users also need the model-level `read_nodegroup` permission** ("Models | node group | Read") to read a resource. Arches requires this in addition to resource-instance permissions.
 - A group permission with no permissions selected grants nothing, and its rule is not evaluated.
+- **Node value rules store the node's nodegroup and datatype when saved.** If the node later moves to another nodegroup or changes datatype (e.g. after graph changes), the rule matches nothing until you edit and save it again.
 - **Granting to Guest makes resources public.** Arches signs logged-out visitors in as the `anonymous` user, which belongs to Guest, so a rule granted to Guest (or to any group containing `anonymous`) applies to everyone who isn't logged in.
 
 ### Available rule classes

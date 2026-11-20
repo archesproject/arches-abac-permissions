@@ -18,7 +18,7 @@ from arches.app.models.tile import Tile
 from arches_abac_permissions.rules.spatial_rule import (
     MAX_BUFFER,
     SpatialRule,
-    parse_area,
+    build_area,
 )
 from tests.test_inclusion_rules import make_rule
 from tests.test_views import ApiTestCase
@@ -86,12 +86,15 @@ class SpatialTestCase(ApiTestCase):
             definition["operator"] = operator
         return definition
 
-    def make_spatial_rule(self, **kwargs):
-        return make_rule(
+    def make_spatial_rule(self, validate=False, **kwargs):
+        rule = make_rule(
             modulename="spatial_rule.py",
             classname="SpatialRule",
             definition=self.definition(**kwargs),
         )
+        if validate:
+            rule.clean()
+        return rule
 
 
 class SpatialRuleTests(SpatialTestCase):
@@ -193,7 +196,7 @@ class SpatialRuleTests(SpatialTestCase):
             data={node: collection(5, 5)},
             sortorder=0,
         )
-        rule = self.make_spatial_rule()
+        rule = self.make_spatial_rule(validate=True)
         # Core refreshes geojson_geometries in after_update_all, not save().
         self.assertFalse(rule.matches_resource(resource))
         Tile.objects.get(pk=tile.pk).after_update_all()
@@ -204,12 +207,12 @@ class SpatialRuleTests(SpatialTestCase):
         Tile.objects.get(pk=tile.pk).after_update_all()
         self.assertFalse(rule.matches_resource(resource))
 
-    def test_area_is_parsed_once(self):
-        parse_area.cache_clear()
-        rule = self.make_spatial_rule()
+    def test_area_is_built_once(self):
+        build_area.cache_clear()
+        rule = self.make_spatial_rule(validate=True)
         rule.matches_resource(self.inside)
         rule.matches_resource(self.outside)
-        self.assertEqual(parse_area.cache_info().misses, 1)
+        self.assertEqual(build_area.cache_info().misses, 1)
 
     def test_draft_graph_rejected(self):
         draft = GraphModel.objects.create(
@@ -240,12 +243,28 @@ class SpatialRuleTests(SpatialTestCase):
 
     def test_crs_member_is_ignored(self):
         rule = self.make_spatial_rule(
+            validate=True,
             geometry={
                 **SQUARE,
                 "crs": {"type": "name", "properties": {"name": "EPSG:3857"}},
-            }
+            },
         )
         self.assertTrue(rule.matches_resource(self.inside))
+
+    def test_stored_crs_member_is_ignored_when_matching(self):
+        crs = {"type": "name", "properties": {"name": "EPSG:3857"}}
+        plain = self.make_spatial_rule(validate=True, geometry=SQUARE)
+        legacy = self.make_spatial_rule(
+            geometry={**SQUARE, "crs": crs}, operator="intersects"
+        )
+        for resource in (self.inside, self.outside):
+            self.assertEqual(
+                legacy.matches_resource(resource), plain.matches_resource(resource)
+            )
+        self.assertEqual(
+            list(legacy.get_matching_resources()), list(plain.get_matching_resources())
+        )
+        self.assertTrue(legacy.matches_resource(self.inside))
 
     def test_invalid_definitions(self):
         bowtie = {
@@ -307,6 +326,94 @@ class SpatialRuleTests(SpatialTestCase):
         self.assertIn(f"WHERE nodeid = '{node.pk}'", sql)
 
 
+class SpatialQueryTests(SpatialTestCase):
+    def test_evaluation_only_runs_the_match_query(self):
+        rule = self.make_spatial_rule(validate=True)
+        with self.assertNumQueries(1):
+            self.assertTrue(rule.matches_resource(self.inside))
+        with self.assertNumQueries(1):
+            self.assertFalse(rule.matches_resource(self.outside))
+        with self.assertNumQueries(0):
+            rule.get_matching_resources()
+        self.assertEqual(
+            set(rule.get_matching_resources()), {self.inside, self.crossing}
+        )
+
+    def test_other_graph_needs_no_query(self):
+        rule = self.make_spatial_rule(validate=True)
+        with self.assertNumQueries(0):
+            self.assertFalse(rule.matches_resource(self.other_graph_active))
+
+    def test_validation_rejects_bad_references(self):
+        for overrides in (
+            {"graphid": str(self.other_graph.pk)},
+            {"nodeid": str(self.string_node.pk)},
+            {"nodeid": str(uuid.uuid4())},
+            {"graphid": str(uuid.uuid4())},
+            {"graphid": "nope"},
+            {"nodeid": "nope"},
+        ):
+            with self.subTest(overrides=overrides):
+                rule = self.make_spatial_rule()
+                rule.definition.update(overrides)
+                with self.assertRaises(ValidationError):
+                    rule.clean()
+
+    def test_validation_stores_normalized_values(self):
+        rule = self.make_spatial_rule(
+            geometry={**SQUARE, "crs": "x"}, buffer=1, node=self.geometry_node
+        )
+        rule.definition["graphid"] = str(self.graph.pk).upper()
+        rule.definition["nodeid"] = str(self.geometry_node.pk).upper()
+        rule.clean()
+        self.assertEqual(
+            rule.definition,
+            {
+                "graphid": str(self.graph.pk),
+                "nodeid": str(self.geometry_node.pk),
+                "geometry": SQUARE,
+                "buffer": 1.0,
+                "operator": "intersects",
+            },
+        )
+
+    def test_matching_does_not_validate(self):
+        rule = self.make_spatial_rule(validate=True)
+        # Wider than validation allows; only validate_definition checks.
+        rule.definition["geometry"] = {
+            "type": "Polygon",
+            "coordinates": [[[-100, 0], [100, 0], [100, 10], [-100, 10], [-100, 0]]],
+        }
+        self.assertTrue(rule.matches_resource(self.inside))
+        self.assertEqual(
+            set(rule.get_matching_resources()), {self.inside, self.crossing}
+        )
+
+    def test_malformed_stored_values_match_nothing(self):
+        for key, bad in (
+            ("geometry", None),
+            ("geometry", "x"),
+            ("geometry", {"type": "Circle"}),
+            ("geometry", {"type": "Polygon", "coordinates": "x"}),
+            ("operator", None),
+            ("operator", "bogus"),
+            ("graphid", "nope"),
+            ("graphid", None),
+            ("nodeid", "nope"),
+            ("nodeid", 5),
+            ("buffer", "x"),
+            ("buffer", [1]),
+        ):
+            with self.subTest(key=key, bad=bad):
+                rule = self.make_spatial_rule(validate=True)
+                rule.definition[key] = bad
+                self.assertFalse(rule.matches_resource(self.inside))
+                self.assertFalse(rule.get_matching_resources().exists())
+        rule = self.make_spatial_rule(validate=True)
+        del rule.definition["operator"]
+        self.assertFalse(rule.matches_resource(self.inside))
+
+
 class BufferedSpatialRuleTests(SpatialTestCase):
     POINT = {"type": "Point", "coordinates": [30, 0]}
     LINE = {"type": "LineString", "coordinates": [[40, 0], [41, 0]]}
@@ -361,19 +468,19 @@ class BufferedSpatialRuleTests(SpatialTestCase):
         self.add_geometry(resource, self.geometry_node, "POINT (10.5 5)")
         self.assertNotIn(resource, self.matches())
         self.assertIn(resource, self.matches(buffer=100000))
-        plain = parse_area(json.dumps(SQUARE, sort_keys=True), 0)
-        grown = parse_area(json.dumps(SQUARE, sort_keys=True), 100000)
+        plain = build_area(json.dumps(SQUARE, sort_keys=True), 0)
+        grown = build_area(json.dumps(SQUARE, sort_keys=True), 100000)
         self.assertGreater(grown.area, plain.area)
 
     def test_many_parts_buffered_in_one_query(self):
-        parse_area.cache_clear()
+        build_area.cache_clear()
         geometry = {
             "type": "MultiPoint",
             "coordinates": [[index / 10, 0] for index in range(50)],
         }
         canonical = json.dumps(geometry, sort_keys=True)
         with self.assertNumQueries(1):
-            area = parse_area(canonical, 1000)
+            area = build_area(canonical, 1000)
         self.assertEqual(area.srid, 4326)
         self.assertIn(area.geom_type, ("Polygon", "MultiPolygon"))
 
@@ -433,14 +540,22 @@ class BufferedSpatialRuleTests(SpatialTestCase):
                 with self.assertRaises(ValidationError):
                     rule.clean()
 
+    def test_buffered_evaluation_is_cached(self):
+        build_area.cache_clear()
+        rule = self.make_spatial_rule(validate=True, geometry=self.POINT, buffer=50000)
+        for _check in range(2):
+            # Only the match query; the buffer query ran when validating.
+            with self.assertNumQueries(1):
+                self.assertTrue(rule.matches_resource(self.near_point))
+
     def test_cache_distinguishes_buffers(self):
-        parse_area.cache_clear()
-        small = self.make_spatial_rule(geometry=self.POINT, buffer=1000)
-        large = self.make_spatial_rule(geometry=self.POINT, buffer=2000)
+        build_area.cache_clear()
+        small = self.make_spatial_rule(validate=True, geometry=self.POINT, buffer=1000)
+        large = self.make_spatial_rule(validate=True, geometry=self.POINT, buffer=2000)
         small.matches_resource(self.near_point)
         large.matches_resource(self.near_point)
         small.matches_resource(self.near_point)
-        self.assertEqual(parse_area.cache_info().misses, 2)
+        self.assertEqual(build_area.cache_info().misses, 2)
         self.assertGreater(
             SpatialRule.parse_definition(large.definition)[1].area,
             SpatialRule.parse_definition(small.definition)[1].area,

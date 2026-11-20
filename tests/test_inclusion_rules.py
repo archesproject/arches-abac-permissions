@@ -178,6 +178,27 @@ class LifecycleStateRuleTests(LifecycleTestCase):
         self.assertIn(f"%22graphid%22%3A%20%22{self.graph.pk}%22", url)
         self.assertIn(f"%22id%22%3A%20%22{self.active_state.pk}%22", url)
 
+    def test_evaluation_needs_no_queries(self):
+        rule = self.make_lifecycle_rule()
+        with self.assertNumQueries(0):
+            self.assertTrue(rule.matches_resource(self.matching))
+            self.assertFalse(rule.matches_resource(self.non_matching))
+            rule.get_matching_resources()
+            rule.get_search_rule_url()
+
+    def test_invalid_ids_match_nothing(self):
+        for definition in (
+            {},
+            {"graphid": "nope", "lifecycle_state_id": str(self.active_state.pk)},
+            {"graphid": str(self.graph.pk), "lifecycle_state_id": None},
+            {"graphid": str(self.graph.pk), "lifecycle_state_id": 5},
+        ):
+            with self.subTest(definition=definition):
+                rule = self.make_lifecycle_rule()
+                rule.definition = definition
+                self.assertFalse(rule.matches_resource(self.matching))
+                self.assertEqual(list(rule.get_matching_resources()), [])
+
     def test_invalid_definitions(self):
         graphid = str(self.graph.pk)
         stateid = str(self.active_state.pk)
@@ -202,7 +223,7 @@ class LifecycleStateRuleTests(LifecycleTestCase):
                     definition=definition,
                 )
                 with self.assertRaises(ValidationError):
-                    LifecycleStateRule.get_matching_resources(rule)
+                    LifecycleStateRule.validate_definition(rule)
 
 
 class InclusionRuleGroupPermissionTests(TestCase):
@@ -421,11 +442,6 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
     def broken_rules(self):
         return [
             make_rule(modulename="lifecycle_state_rule.py", classname="Missing"),
-            make_rule(
-                modulename="lifecycle_state_rule.py",
-                classname="LifecycleStateRule",
-                definition={},
-            ),
         ]
 
     def test_get_perms_ignores_broken_rule(self):
