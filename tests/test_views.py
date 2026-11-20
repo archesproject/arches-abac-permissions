@@ -242,7 +242,7 @@ class RuleApiTests(ApiTestCase):
 class ReferenceDataApiTests(ApiTestCase):
     def test_rule_types(self):
         types = self.client.get(reverse("abac_rule_types")).json()["rule_types"]
-        expected = ["elasticsearch", "lifecycle_state"]
+        expected = ["combined", "elasticsearch", "lifecycle_state"]
         if apps.is_installed("arches_resource_sets"):
             expected.append("resource_set")
         expected += ["spatial", "tile_node_value"]
