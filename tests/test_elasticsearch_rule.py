@@ -2,12 +2,18 @@ import json
 from unittest import mock, skipUnless
 from urllib.parse import urlencode
 
+from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
 from django.test import override_settings
 
 from arches.app.models.models import GraphModel, SearchComponent
+from arches.app.search.elasticsearch_dsl_builder import Query
 from arches.app.search.mappings import RESOURCES_INDEX
 from arches.app.search.search_engine_factory import SearchEngineFactory
+from arches_abac_permissions.models import InclusionRuleGroupPermission
+from arches_abac_permissions.permissions.arches_abac_permission_framework import (
+    ArchesAbacPermissionFramework,
+)
 from arches_abac_permissions.rules import elasticsearch_rule
 from arches_abac_permissions.rules.elasticsearch_rule import (
     ElasticsearchRule,
@@ -32,13 +38,18 @@ class ElasticsearchRuleTestCase(LifecycleTestCase):
     def setUpTestData(cls):
         super().setUpTestData()
         # Search leaves out resources of inactive models.
-        GraphModel.objects.filter(pk=cls.graph.pk).update(is_active=True)
+        GraphModel.objects.filter(pk__in=[cls.graph.pk, cls.other_graph.pk]).update(
+            is_active=True
+        )
 
-    def graph_rule(self):
+    def setUp(self):
+        elasticsearch_rule.COMPILED.clear()
+
+    def graph_rule(self, graph=None):
         return make_elasticsearch_rule(
             **{
                 "resource-type-filter": [
-                    {"graphid": str(self.graph.pk), "inverted": False}
+                    {"graphid": str((graph or self.graph).pk), "inverted": False}
                 ]
             }
         )
@@ -56,6 +67,41 @@ class ElasticsearchRuleTests(ElasticsearchRuleTestCase):
             dsl(self.graph_rule().get_search_filter_for_rule())["bool"]["filter"][0][
                 "bool"
             ]["filter"],
+        )
+
+    def test_compiles_each_search_once(self):
+        first, second = self.graph_rule(), self.graph_rule()
+        with mock.patch.object(
+            ElasticsearchRule, "compile", wraps=ElasticsearchRule.compile
+        ) as compile:
+            first.get_search_filter_for_rule()
+            second.get_search_filter_for_rule()
+            first.clean()
+        # Validation always compiles, so a broken search is never accepted.
+        self.assertEqual(compile.call_count, 2)
+
+    def test_recompiles_when_a_resource_model_changes(self):
+        rule = self.graph_rule()
+        rule.get_search_filter_for_rule()
+        GraphModel.objects.filter(pk=self.graph.pk).update(is_active=False)
+        with mock.patch.object(
+            ElasticsearchRule, "compile", wraps=ElasticsearchRule.compile
+        ) as compile:
+            # Inactive models drop out of a resource-type search.
+            self.assertIn(
+                {"terms": {"graph_id": []}},
+                dsl(rule.get_search_filter_for_rule())["bool"]["filter"][0]["bool"][
+                    "filter"
+                ],
+            )
+        self.assertEqual(compile.call_count, 1)
+
+    def test_cached_filter_is_not_shared(self):
+        rule = self.graph_rule()
+        rule.get_search_filter_for_rule().filter({"match_all": {}})
+        self.assertNotIn(
+            {"match_all": {}},
+            dsl(rule.get_search_filter_for_rule())["bool"]["filter"],
         )
 
     def test_keeps_only_filtering_components(self):
@@ -190,3 +236,56 @@ class ElasticsearchRuleSearchTests(ElasticsearchRuleTestCase):
         )
         with self.assertRaisesMessage(ValidationError, "can't run the search"):
             rule.clean()
+
+    def searcher(self, *grants):
+        group = Group.objects.create(name="searchers")
+        user = User.objects.create(username="searcher")
+        user.groups.add(group)
+        for rule, codename in grants:
+            InclusionRuleGroupPermission.objects.create(
+                rule=rule, group=group
+            ).permissions.set(Permission.objects.filter(codename=codename))
+        return user
+
+    def test_record_check_asks_search_once_for_all_rules(self):
+        framework = ArchesAbacPermissionFramework()
+        broken = make_rule(
+            modulename="elasticsearch_rule.py",
+            classname="ElasticsearchRule",
+            definition={},
+        )
+        user = self.searcher(
+            (self.graph_rule(), "view_resourceinstance"),
+            (self.graph_rule(self.other_graph), "change_resourceinstance"),
+            (broken, "delete_resourceinstance"),
+        )
+        with (
+            mock.patch.object(
+                Query, "search", autospec=True, side_effect=Query.search
+            ) as search,
+            self.assertLogs(
+                "arches_abac_permissions.permissions.arches_abac_permission_framework"
+            ),
+        ):
+            perms = framework.get_abac_perms(user, self.matching)
+        self.assertEqual(perms, {"view_resourceinstance"})
+        self.assertEqual(search.call_count, 1)
+
+    def test_a_search_elasticsearch_refuses_leaves_other_rules_working(self):
+        framework = ArchesAbacPermissionFramework()
+        refused = make_elasticsearch_rule(
+            **{
+                "term-filter": [
+                    {"type": "string", "value": "castle* AND", "inverted": False}
+                ]
+            }
+        )
+        user = self.searcher(
+            (self.graph_rule(), "view_resourceinstance"),
+            (refused, "change_resourceinstance"),
+        )
+        with self.assertLogs(
+            "arches_abac_permissions.permissions.arches_abac_permission_framework"
+        ):
+            perms = framework.get_abac_perms(user, self.matching)
+        self.assertEqual(perms, {"view_resourceinstance"})
