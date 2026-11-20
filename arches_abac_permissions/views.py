@@ -4,7 +4,7 @@ from http import HTTPStatus
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
@@ -117,7 +117,7 @@ def get_rules_queryset():
     ).filter(typed)
 
 
-def parse_rule_payload(body):
+def parse_rule_payload(body, rule_id=None):
     """Validate a rule payload and return field values, definition, and grants."""
     name = body.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -140,6 +140,9 @@ def parse_rule_payload(body):
         modulename=rule_type.modulename,
         classname=rule_type.classname,
     )
+    if rule_id:
+        # Rules that refer to other rules check against their own id.
+        rule.pk = rule_id
     rule_class = rule.get_class_module()
     try:
         definition = rule_class.clean_definition(
@@ -226,8 +229,16 @@ class RuleView(SuperuserAPIView):
         return JSONResponse(serialize_rule(rule))
 
     def put(self, request, rule_id):
-        fields, grants = parse_rule_payload(self.get_json_body(request))
+        body = self.get_json_body(request)
         with transaction.atomic():
+            # Two combined rules saved together could each pass the check that
+            # a rule doesn't include itself and make a loop between them, so
+            # rule changes are made one at a time.
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"LOCK TABLE {InclusionRule._meta.db_table} IN EXCLUSIVE MODE"
+                )
+            fields, grants = parse_rule_payload(body, rule_id)
             try:
                 rule = get_rules_queryset().select_for_update().get(pk=rule_id)
             except InclusionRule.DoesNotExist:
