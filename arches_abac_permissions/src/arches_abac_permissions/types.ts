@@ -57,8 +57,37 @@ export interface User {
     groups: number[];
 }
 
+export interface UserDirectory {
+    users: User[];
+    invite_expiry_hours: number;
+    current_user_id: number;
+}
+
+export interface NewUserPayload {
+    first_name: string;
+    last_name: string;
+    email: string;
+    username: string;
+    phone: string;
+}
+
+export type NewUserFieldErrors = Partial<Record<keyof NewUserPayload, string>>;
+
+export type PasswordAction = "keep" | "reset";
+
+export interface UserUpdatePayload extends Partial<NewUserPayload> {
+    is_active?: boolean;
+    password_action?: PasswordAction;
+}
+
+export type DeleteBlockCode = "self" | "public" | "superuser" | "history";
+
 export interface UserDetails extends User {
     email: string;
+    phone: string;
+    can_delete: boolean;
+    delete_block_code: DeleteBlockCode | null;
+    delete_block_reason: string | null;
     last_login: string | null;
     date_joined: string;
 }
