@@ -307,6 +307,43 @@ class SpatialRuleTests(SpatialTestCase):
         self.assertIn(f"WHERE nodeid = '{node.pk}'", sql)
 
 
+class SpatialQueryTests(SpatialTestCase):
+    def test_evaluation_only_runs_the_match_query(self):
+        rule = self.make_spatial_rule()
+        with self.assertNumQueries(1):
+            self.assertTrue(rule.matches_resource(self.inside))
+        with self.assertNumQueries(1):
+            self.assertFalse(rule.matches_resource(self.outside))
+        with self.assertNumQueries(0):
+            rule.get_matching_resources()
+        self.assertEqual(
+            set(rule.get_matching_resources()), {self.inside, self.crossing}
+        )
+
+    def test_other_graph_needs_no_query(self):
+        rule = self.make_spatial_rule()
+        with self.assertNumQueries(0):
+            self.assertFalse(rule.matches_resource(self.other_graph_active))
+
+    def test_validation_rejects_bad_references(self):
+        for overrides in (
+            {"graphid": str(self.other_graph.pk)},
+            {"nodeid": str(self.string_node.pk)},
+            {"nodeid": str(uuid.uuid4())},
+            {"graphid": str(uuid.uuid4())},
+            {"graphid": "nope"},
+            {"nodeid": "nope"},
+        ):
+            with self.subTest(overrides=overrides):
+                rule = self.make_spatial_rule()
+                rule.definition.update(overrides)
+                with self.assertRaises(ValidationError):
+                    rule.clean()
+                if "nope" in overrides.values():
+                    with self.assertRaises(ValidationError):
+                        rule.matches_resource(self.inside)
+
+
 class BufferedSpatialRuleTests(SpatialTestCase):
     POINT = {"type": "Point", "coordinates": [30, 0]}
     LINE = {"type": "LineString", "coordinates": [[40, 0], [41, 0]]}

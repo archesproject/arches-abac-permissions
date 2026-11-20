@@ -1,4 +1,5 @@
 import uuid
+from importlib import import_module
 from unittest import skipUnless
 
 from django.apps import apps
@@ -12,6 +13,7 @@ from arches.app.models.models import (
     NodeGroup,
     TileModel,
 )
+from arches_abac_permissions.models import InclusionRule
 from arches_abac_permissions.rules.tile_node_value_rule import TileNodeValueRule
 from tests.test_inclusion_rules import make_rule
 from tests.test_views import ApiTestCase
@@ -106,12 +108,17 @@ class TileNodeValueTestCase(ApiTestCase):
             **extra,
         }
 
-    def make_value_rule(self, datatype, value, **extra):
-        return make_rule(
+    def make_value_rule(self, datatype, value, validate=True, **extra):
+        rule = InclusionRule(
+            name="rule",
             modulename="tile_node_value_rule.py",
             classname="TileNodeValueRule",
             definition=self.definition(datatype, value, **extra),
         )
+        if validate:
+            rule.clean()
+        rule.save()
+        return rule
 
 
 class TileNodeValueRuleTests(TileNodeValueTestCase):
@@ -208,6 +215,97 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
         with self.assertRaises(ValidationError):
             rule.clean()
 
+    def test_validation_stores_server_derived_keys(self):
+        node = self.nodes["resource-instance"]
+        related = str(self.related.pk)
+        rule = self.make_value_rule("resource-instance", related.upper())
+        self.assertEqual(rule.definition["nodegroupid"], str(self.value_nodegroup.pk))
+        self.assertEqual(rule.definition["datatype"], "resource-instance")
+        self.assertEqual(rule.definition["value"], related)
+        bogus = {"nodegroupid": str(uuid.uuid4()), "datatype": "string"}
+        rule = make_rule(
+            modulename="tile_node_value_rule.py",
+            classname="TileNodeValueRule",
+            definition={**self.definition("number", "5"), **bogus},
+        )
+        rule.clean()
+        self.assertEqual(rule.definition["nodegroupid"], str(node.nodegroup_id))
+        self.assertEqual(rule.definition["datatype"], "number")
+
+    def test_evaluation_queries(self):
+        for datatype, value, expected in (
+            ("number", "5", 0),
+            ("non-localized-string", "abc", 0),
+            ("string", "hola", 1),
+        ):
+            with self.subTest(datatype=datatype):
+                rule = self.make_value_rule(datatype, value)
+                with self.assertNumQueries(expected):
+                    rule.get_matching_resources()
+                    rule.matches_resource(self.other_graph_active)
+        rule = self.make_value_rule("string", "hola", language="es")
+        with self.assertNumQueries(0):
+            rule.get_matching_resources()
+
+    def test_missing_or_malformed_stored_keys_match_nothing(self):
+        for key, bad in (
+            ("nodegroupid", None),
+            ("nodegroupid", "nope"),
+            ("datatype", None),
+            ("datatype", "geojson-feature-collection"),
+            ("value", ""),
+            ("graphid", "nope"),
+        ):
+            with self.subTest(key=key, bad=bad):
+                rule = self.make_value_rule("non-localized-string", "abc")
+                self.assertTrue(rule.matches_resource(self.hit))
+                rule.definition[key] = bad
+                self.assertFalse(rule.matches_resource(self.hit))
+                self.assertEqual(list(rule.get_matching_resources()), [])
+
+    def test_migration_stores_keys(self):
+        migration = import_module(
+            "arches_abac_permissions.migrations.0007_tilenodevaluerule_nodegroup_datatype"
+        )
+        related = str(self.related.pk)
+        rule = self.make_value_rule("resource-instance", related)
+        original = self.definition("missing-node", "x")
+        missing = make_rule(
+            modulename="tile_node_value_rule.py",
+            classname="TileNodeValueRule",
+            definition=original,
+        )
+        stored = ("nodegroupid", "datatype")
+        for key in stored:
+            rule.definition.pop(key)
+        rule.definition["value"] = related.upper()
+        rule.save()
+        migration.store_node_keys(apps, None)
+        rule.refresh_from_db()
+        missing.refresh_from_db()
+        self.assertEqual(rule.definition["nodegroupid"], str(self.value_nodegroup.pk))
+        self.assertEqual(rule.definition["datatype"], "resource-instance")
+        self.assertEqual(rule.definition["value"], related)
+        self.assertEqual(missing.definition, original)
+        self.assertTrue(rule.matches_resource(self.hit))
+        migration.remove_node_keys(apps, None)
+        rule.refresh_from_db()
+        self.assertFalse(any(key in rule.definition for key in stored))
+
+    def test_migration_skips_malformed_nodeid(self):
+        migration = import_module(
+            "arches_abac_permissions.migrations.0007_tilenodevaluerule_nodegroup_datatype"
+        )
+        original = {**self.definition("number", "5"), "nodeid": "nope"}
+        rule = make_rule(
+            modulename="tile_node_value_rule.py",
+            classname="TileNodeValueRule",
+            definition=original,
+        )
+        migration.store_node_keys(apps, None)
+        rule.refresh_from_db()
+        self.assertEqual(rule.definition, original)
+
     def test_index_sql(self):
         node = self.nodes["number"]
         sql = self.make_value_rule("number", "5").get_index_sql_for_rule()
@@ -248,7 +346,7 @@ class TileNodeValueRuleTests(TileNodeValueTestCase):
         rule.clean()
         self.assertEqual(set(rule.get_matching_resources()), {self.hit})
 
-        other = self.make_value_rule("reference", str(uuid.uuid4()))
+        other = self.make_value_rule("reference", str(uuid.uuid4()), validate=False)
         with self.assertRaises(ValidationError):
             other.clean()
 
@@ -258,8 +356,27 @@ class TileNodeValueApiTests(TileNodeValueTestCase):
         definition = self.definition("number", "5")
         created = self.create_rule(rule_type="tile_node_value", definition=definition)
         self.assertEqual(created["rule_type"], "tile_node_value")
-        self.assertEqual(created["definition"], definition)
+        self.assertEqual(
+            created["definition"],
+            {
+                **definition,
+                "nodegroupid": str(self.value_nodegroup.pk),
+                "datatype": "number",
+            },
+        )
         self.assertIn("CREATE INDEX CONCURRENTLY", created["index_sql"])
+
+    def test_client_cannot_set_server_derived_keys(self):
+        definition = {
+            **self.definition("number", "5"),
+            "nodegroupid": str(uuid.uuid4()),
+            "datatype": "string",
+        }
+        created = self.create_rule(rule_type="tile_node_value", definition=definition)
+        self.assertEqual(
+            created["definition"]["nodegroupid"], str(self.value_nodegroup.pk)
+        )
+        self.assertEqual(created["definition"]["datatype"], "number")
 
     def test_invalid_value_rejected(self):
         response = self.send(
