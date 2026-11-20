@@ -15,6 +15,9 @@ from arches.app.models.models import (
     ResourceInstanceLifecycleState,
     TileModel,
 )
+from arches.app.permissions.arches_default_deny import (
+    settings as default_deny_settings,
+)
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.permissions.arches_abac_permission_framework import (
     ArchesAbacPermissionFramework,
@@ -352,6 +355,64 @@ class AbacRuleEvaluationTests(LifecycleTestCase):
             self.user, ResourceInstance.objects.filter(graph=self.graph)
         )
         self.assertEqual(set(filtered), {self.matching, self.also_matching})
+
+    def filtered_instance_ids(self, user=None, resources=None):
+        # The default-deny part comes from the database rather than an
+        # Elasticsearch index the test resources were never added to.
+        with mock.patch.object(default_deny_settings, "ELASTICSEARCH_ENABLED", False):
+            is_exclusive, instances = self.framework.get_filtered_instances(
+                user or self.user, resources=resources
+            )
+        self.assertTrue(is_exclusive)
+        return set(instances)
+
+    def test_get_filtered_instances_includes_rule_matches(self):
+        self.assertEqual(
+            self.filtered_instance_ids(),
+            {str(self.matching.pk), str(self.also_matching.pk)},
+        )
+
+    def test_get_filtered_instances_limits_rule_matches_to_resources(self):
+        self.assertEqual(
+            self.filtered_instance_ids(
+                resources=[str(self.matching.pk), str(self.non_matching.pk)]
+            ),
+            {str(self.matching.pk)},
+        )
+
+    def test_get_filtered_instances_only_counts_read_grants(self):
+        InclusionRuleGroupPermission.objects.all().delete()
+        self.grant(self.make_lifecycle_rule(), "change_resourceinstance")
+        self.assertEqual(self.filtered_instance_ids(), set())
+
+    def test_get_filtered_instances_keeps_explicit_and_owned_resources(self):
+        self.framework.assign_perm(
+            "view_resourceinstance", self.group, self.non_matching
+        )
+        ResourceInstance.objects.filter(pk=self.other_graph_active.pk).update(
+            principaluser=self.user
+        )
+        self.assertEqual(
+            self.filtered_instance_ids(),
+            {
+                str(self.matching.pk),
+                str(self.also_matching.pk),
+                str(self.non_matching.pk),
+                str(self.other_graph_active.pk),
+            },
+        )
+
+    def test_get_filtered_instances_ignores_rules_of_other_groups(self):
+        outsider = User.objects.create(username="outsider")
+        self.assertEqual(self.filtered_instance_ids(user=outsider), set())
+
+    def test_get_filtered_instances_superuser_gets_requested_resources(self):
+        superuser = User.objects.create(username="rules superuser", is_superuser=True)
+        requested = [str(self.non_matching.pk)]
+        self.assertEqual(
+            self.filtered_instance_ids(user=superuser, resources=requested),
+            set(requested),
+        )
 
     framework_logger = (
         "arches_abac_permissions.permissions.arches_abac_permission_framework"
