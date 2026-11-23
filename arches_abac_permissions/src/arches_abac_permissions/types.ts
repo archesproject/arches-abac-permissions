@@ -25,6 +25,10 @@ export interface Rule {
     group_permissions: GroupPermission[];
     // SQL for an index that speeds up evaluating the rule, if one helps.
     index_sql: string | null;
+    // False when Elasticsearch search can't use the rule; null when Elasticsearch is off.
+    in_es_search: boolean | null;
+    // Why the rule can't be evaluated, in which case it grants nothing.
+    problem: string | null;
 }
 
 export interface Group {

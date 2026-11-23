@@ -3,6 +3,7 @@ import { computed } from "vue";
 import { useGettext } from "vue3-gettext";
 
 import InputText from "openvue/inputtext";
+import Message from "openvue/message";
 import Textarea from "openvue/textarea";
 
 import IndexSqlDisclosure from "@/arches_abac_permissions/plugins/RulePermissions/components/RuleConfiguration/components/IndexSqlDisclosure/IndexSqlDisclosure.vue";
@@ -101,6 +102,28 @@ const heading = computed(() => {
                     v-if="form"
                     v-model="draft.definition"
                 />
+                <Message
+                    v-if="savedRule && savedRule.problem"
+                    severity="error"
+                    :closable="false"
+                >
+                    {{
+                        $gettext("This rule grants nothing: %{problem}", {
+                            problem: savedRule.problem,
+                        })
+                    }}
+                </Message>
+                <Message
+                    v-else-if="savedRule?.in_es_search === false"
+                    severity="warn"
+                    :closable="false"
+                >
+                    {{
+                        $gettext(
+                            "Elasticsearch search doesn't use this rule. It still applies when a record is opened, on maps and in arches-search.",
+                        )
+                    }}
+                </Message>
                 <IndexSqlDisclosure
                     :index-sql="savedRule ? savedRule.index_sql : undefined"
                     :is-stale="isIndexSqlStale"

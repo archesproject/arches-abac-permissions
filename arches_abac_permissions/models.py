@@ -74,6 +74,11 @@ class InclusionRule(models.Model):
         """
         return None
 
+    @classmethod
+    def has_search_filter(cls, inclusion_rule):
+        """Whether Elasticsearch search can use this rule. Override when cheaper."""
+        return cls.get_search_filter(inclusion_rule) is not None
+
     def clean(self):
         super().clean()
         if not self.modulename or not self.classname:
@@ -110,6 +115,9 @@ class InclusionRule(models.Model):
 
     def get_matching_resources(self):
         return self.get_class_module().get_matching_resources(self)
+
+    def has_search_filter_for_rule(self):
+        return self.get_class_module().has_search_filter(self)
 
     def get_search_filter_for_rule(self):
         return self.get_class_module().get_search_filter(self)

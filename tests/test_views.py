@@ -1,14 +1,18 @@
 import json
 import uuid
-from unittest import skipIf, skipUnless
+from unittest import mock, skipIf, skipUnless
 
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission, User
+from django.core.exceptions import ValidationError
 from django.test import TestCase
 from django.urls import reverse
 
+from arches.app.models.system_settings import settings
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
+from arches_abac_permissions.rules.lifecycle_state_rule import LifecycleStateRule
 from tests.test_inclusion_rules import LifecycleTestCase, make_rule
+from tests.test_search_filters import lifecycle_filter
 
 
 class ApiTestCase(LifecycleTestCase):
@@ -119,6 +123,49 @@ class RuleApiTests(ApiTestCase):
         self.assertEqual(self.send("put", url, self.payload()).status_code, 404)
         self.assertEqual(self.send("delete", url).status_code, 404)
         self.assertTrue(InclusionRule.objects.filter(pk=rule.pk).exists())
+
+    @mock.patch.object(
+        LifecycleStateRule, "get_search_filter", side_effect=lifecycle_filter
+    )
+    def test_rules_say_whether_search_uses_them(self, _search_filter):
+        searchable = self.create_rule()
+        unsearchable = make_rule(
+            modulename="tile_node_value_rule.py", classname="TileNodeValueRule"
+        )
+        listed = {
+            rule["id"]: rule["in_es_search"]
+            for rule in self.client.get(reverse("abac_rules")).json()["rules"]
+        }
+        self.assertEqual(
+            listed,
+            {
+                searchable["id"]: True,
+                str(unsearchable.pk): False,
+            },
+        )
+
+    def test_no_elasticsearch_warnings_without_elasticsearch(self):
+        rule = make_rule(
+            modulename="tile_node_value_rule.py", classname="TileNodeValueRule"
+        )
+        with mock.patch.object(settings, "ELASTICSEARCH_ENABLED", False, create=True):
+            listed = self.client.get(reverse("abac_rules")).json()["rules"]
+        self.assertEqual(
+            [(r["id"], r["in_es_search"]) for r in listed], [(str(rule.pk), None)]
+        )
+
+    def test_rules_say_why_they_grant_nothing(self):
+        rule = self.create_rule()
+        with mock.patch.object(
+            LifecycleStateRule,
+            "get_search_filter",
+            side_effect=ValidationError("The search no longer runs."),
+        ):
+            listed = self.client.get(reverse("abac_rules")).json()["rules"]
+        self.assertEqual(
+            [(r["id"], r["in_es_search"], r["problem"]) for r in listed],
+            [(rule["id"], False, "The search no longer runs.")],
+        )
 
     def test_update_replaces_grants(self):
         other = Group.objects.create(name="Other")
