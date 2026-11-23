@@ -42,10 +42,11 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
     the single-resource checks (``user_can_read_resource``,
     ``user_can_edit_resource``, ``user_can_delete_resource``,
     ``has_group_perm``), in ``filter_resource_queryset``, which drives
-    SQL-based search such as arches-search, and in ``get_filtered_instances``
+    SQL-based search such as arches-search, in ``get_filtered_instances``
     (read access only), which drives map tiles, related resources and the geo
-    and resource listing APIs. Elasticsearch results are not yet filtered by
-    rules.
+    and resource listing APIs, and in ``get_permission_search_filter``, which
+    drives Elasticsearch search for the rules that can be expressed there (see
+    ``InclusionRule.get_search_filter``).
     """
 
     def __init__(self):
@@ -109,11 +110,10 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
                 perms |= codenames
         return perms
 
-    def get_abac_resources(self, user: User, permission: str):
+    def get_granted_rules(self, user: User, permission: str):
         """
-        Return the resource instances on which ``user`` is granted
-        ``permission`` (a codename, optionally prefixed "app_label.") by the
-        inclusion rules assigned to its groups.
+        Return the active inclusion rules that grant ``permission`` (a
+        codename, optionally prefixed "app_label.") to any of ``user``'s groups.
         """
         from arches_abac_permissions.models import InclusionRule
 
@@ -127,9 +127,15 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
             grant_filter &= Q(
                 group_permissions__permissions__content_type__app_label=app_label
             )
+        return InclusionRule.objects.filter(grant_filter).distinct()
 
+    def get_abac_resources(self, user: User, permission: str):
+        """
+        Return the resource instances on which ``user`` is granted
+        ``permission`` by the inclusion rules assigned to its groups.
+        """
         matches = Q()
-        for rule in InclusionRule.objects.filter(grant_filter).distinct():
+        for rule in self.get_granted_rules(user, permission):
             matching = self.evaluate_rule(
                 rule, lambda r: r.get_matching_resources(), default=None
             )
@@ -192,9 +198,14 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         )
 
     def get_permission_search_filter(self, user: User) -> Bool:
-        # TODO: OR in an ABAC-derived search filter once rule evaluation
-        # exists.
-        return super().get_permission_search_filter(user)
+        has_access = Bool().should(super().get_permission_search_filter(user))
+        for rule in self.get_granted_rules(user, "models.view_resourceinstance"):
+            search_filter = self.evaluate_rule(
+                rule, lambda r: r.get_search_filter_for_rule(), default=None
+            )
+            if search_filter is not None and has_clauses(search_filter):
+                has_access.should(search_filter)
+        return Bool().filter(has_access)
 
     def get_perms(
         self, user_or_group: User | Group, obj: ResourceInstance
@@ -202,3 +213,11 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         perms = super().get_perms(user_or_group, obj)
         abac_perms = self.get_abac_perms(user_or_group, obj)
         return perms + sorted(abac_perms.difference(perms))
+
+
+def has_clauses(search_filter):
+    """Elasticsearch matches every resource with an empty bool, so it isn't a filter."""
+    clauses = search_filter.dsl.get("bool")
+    if clauses is None:
+        return True
+    return any(clauses.get(kind) for kind in ("filter", "must", "should", "must_not"))
