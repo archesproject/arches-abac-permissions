@@ -240,10 +240,14 @@ def search_resource_ids(search_filter) -> list[str]:
     query.add_query(search_filter)
     query.include("resourceinstanceid")
     results = query.search(index=RESOURCES_INDEX, scroll="1m")
-    hits = results["hits"]["hits"]
-    while len(hits) < results["hits"]["total"]["value"]:
-        page = search_engine.es.scroll(scroll_id=results["_scroll_id"], scroll="1m")
-        if not page["hits"]["hits"]:
-            break
-        hits += page["hits"]["hits"]
+    scroll_id = results["_scroll_id"]
+    page = results["hits"]["hits"]
+    hits = list(page)
+    # Page until an empty page: hits.total stops counting at 10,000.
+    while page:
+        results = search_engine.es.scroll(scroll_id=scroll_id, scroll="1m")
+        scroll_id = results["_scroll_id"]
+        page = results["hits"]["hits"]
+        hits += page
+    search_engine.es.clear_scroll(scroll_id=scroll_id)
     return [hit["_id"] for hit in hits]

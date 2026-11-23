@@ -7,7 +7,8 @@ from django.core.exceptions import ValidationError
 from django.test import override_settings
 
 from arches.app.models.models import GraphModel, SearchComponent
-from arches.app.search.elasticsearch_dsl_builder import Query
+from arches.app.models.system_settings import settings
+from arches.app.search.elasticsearch_dsl_builder import Query, Terms
 from arches.app.search.mappings import RESOURCES_INDEX
 from arches.app.search.search_engine_factory import SearchEngineFactory
 from arches_abac_permissions.models import InclusionRuleGroupPermission
@@ -19,6 +20,7 @@ from arches_abac_permissions.rules.elasticsearch_rule import (
     ElasticsearchRule,
     get_search_component_names,
     narrows,
+    search_resource_ids,
 )
 from tests.test_inclusion_rules import LifecycleTestCase, make_rule
 from tests.test_search_filters import dsl, elasticsearch_available
@@ -217,6 +219,12 @@ class ElasticsearchRuleSearchTests(ElasticsearchRuleTestCase):
         for resource in cls.indexed:
             se.delete(index=RESOURCES_INDEX, id=str(resource.pk))
         super().tearDownClass()
+
+    def test_search_resource_ids_reads_every_page(self):
+        ids = [str(resource.pk) for resource in self.indexed]
+        search_filter = Terms(field="resourceinstanceid", terms=ids)
+        with mock.patch.object(settings, "SEARCH_RESULT_LIMIT", 1):
+            self.assertCountEqual(search_resource_ids(search_filter), ids)
 
     def test_matches_what_search_finds(self):
         rule = self.graph_rule()
