@@ -130,3 +130,28 @@ class InclusionRuleGroupPermission(models.Model):
                 fields=["rule", "group"], name="unique_inclusion_rule_group"
             )
         ]
+
+
+class NestedGroup(models.Model):
+    """Group `group` sits inside group `parent`."""
+
+    group = models.ForeignKey(
+        Group, on_delete=models.CASCADE, related_name="abac_parent_links"
+    )
+    parent = models.ForeignKey(
+        Group, on_delete=models.CASCADE, related_name="abac_child_links"
+    )
+
+    class Meta:
+        managed = True
+        db_table = "abac_nested_groups"
+        app_label = "arches_abac_permissions"
+        constraints = [
+            models.UniqueConstraint(
+                fields=["group", "parent"], name="unique_abac_nested_group"
+            ),
+            models.CheckConstraint(
+                condition=~models.Q(group=models.F("parent")),
+                name="abac_nested_group_not_itself",
+            ),
+        ]

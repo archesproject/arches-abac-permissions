@@ -27,6 +27,7 @@ from arches.app.permissions.arches_default_deny import (
 )
 from arches.app.search.elasticsearch_dsl_builder import Bool
 from arches.app.search.search import SearchEngine
+from arches_abac_permissions.nested_groups import inheritance_links, reachable
 
 logger = logging.getLogger(__name__)
 
@@ -53,11 +54,19 @@ class ArchesAbacPermissionFramework(ArchesDefaultDenyPermissionFramework):
         self.reported_failures = set()
 
     def get_groups(self, user_or_group: User | Group | None):
+        """The groups whose rules apply, including those reached by nesting."""
         if isinstance(user_or_group, Group):
-            return [user_or_group]
-        if isinstance(user_or_group, User):
-            return user_or_group.groups.all()
-        return Group.objects.none()
+            own = Group.objects.filter(pk=user_or_group.pk)
+        elif isinstance(user_or_group, User):
+            own = user_or_group.groups.all()
+        else:
+            return Group.objects.none()
+        links = inheritance_links()
+        if not links:
+            return own
+        return Group.objects.filter(
+            pk__in=reachable(own.values_list("pk", flat=True), links)
+        )
 
     def evaluate_rule(self, rule, evaluate, default):
         """Run evaluate(rule), treating a rule that raises as matching nothing."""

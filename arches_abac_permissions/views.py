@@ -4,7 +4,7 @@ from http import HTTPStatus
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission
 from django.core.exceptions import ValidationError
-from django.db import IntegrityError, transaction
+from django.db import IntegrityError, connection, transaction
 from django.db.models import Count, Q
 from django.http import HttpResponse
 from django.utils.translation import gettext as _
@@ -15,7 +15,19 @@ from arches.app.utils.geo_utils import GeoUtils
 from arches.app.utils.i18n import get_localized_value
 from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches.app.views.api import APIBase
-from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
+from arches_abac_permissions.models import (
+    InclusionRule,
+    InclusionRuleGroupPermission,
+    NestedGroup,
+)
+from arches_abac_permissions.nested_groups import (
+    OFF,
+    creates_cycle,
+    get_inheritance,
+    get_parents,
+    inheritance_links,
+    walk,
+)
 from arches_abac_permissions.rule_types import (
     ANONYMOUS_USERNAME,
     BUILT_IN_GROUP_NAMES,
@@ -440,6 +452,28 @@ class MapConfigView(SuperuserAPIView):
         )
 
 
+def parse_id_list(body, key):
+    value = body.get(key, [])
+    if not isinstance(value, list) or not all(
+        isinstance(item, int) and not isinstance(item, bool) for item in value
+    ):
+        raise BadRequest(_("“%(key)s” must be a list of ids.") % {"key": key})
+    return set(value)
+
+
+def serialize_groups(groups):
+    parents = get_parents()
+    links = inheritance_links()
+    return [
+        {
+            **serialize_group(group),
+            "parent_ids": sorted(parents[group.pk]),
+            "inherits_from_ids": walk([group.pk], links),
+        }
+        for group in groups
+    ]
+
+
 def serialize_group(group):
     return {
         "id": group.pk,
@@ -454,7 +488,9 @@ def serialize_group(group):
 class GroupsView(SuperuserAPIView):
     def get(self, request):
         groups = get_groups_queryset().order_by("name")
-        return JSONResponse({"groups": [serialize_group(group) for group in groups]})
+        return JSONResponse(
+            {"groups": serialize_groups(groups), "nesting": get_inheritance()}
+        )
 
     def post(self, request):
         name = self.get_json_body(request).get("name")
@@ -472,10 +508,47 @@ class GroupsView(SuperuserAPIView):
                 status=HTTPStatus.CONFLICT,
             )
         group = get_groups_queryset().get(pk=group.pk)
-        return JSONResponse(serialize_group(group), status=HTTPStatus.CREATED)
+        return JSONResponse(serialize_groups([group])[0], status=HTTPStatus.CREATED)
 
 
 class GroupView(SuperuserAPIView):
+    def put(self, request, group_id):
+        """Replace the groups this group sits inside."""
+        if get_inheritance() == OFF:
+            return JSONErrorResponse(
+                message=_("Nested groups are turned off."),
+                status=HTTPStatus.CONFLICT,
+            )
+        try:
+            group = Group.objects.get(pk=group_id)
+        except Group.DoesNotExist:
+            return JSONErrorResponse(
+                message=_("Group not found."), status=HTTPStatus.NOT_FOUND
+            )
+        body = self.get_json_body(request)
+        if "parent_ids" not in body:
+            raise BadRequest(_("“parent_ids” is required."))
+        parent_ids = parse_id_list(body, "parent_ids")
+        if Group.objects.filter(pk__in=parent_ids).count() != len(parent_ids):
+            raise BadRequest(_("Unknown group."))
+        with transaction.atomic():
+            # Two saves could each pass the loop check alone and make a loop
+            # together, so nesting changes are made one at a time.
+            with connection.cursor() as cursor:
+                cursor.execute(
+                    f"LOCK TABLE {NestedGroup._meta.db_table} IN EXCLUSIVE MODE"
+                )
+            if creates_cycle(group.pk, parent_ids):
+                raise BadRequest(_("A group cannot sit inside itself."))
+            NestedGroup.objects.filter(group=group).delete()
+            NestedGroup.objects.bulk_create(
+                NestedGroup(group=group, parent_id=parent_id)
+                for parent_id in parent_ids
+            )
+        return JSONResponse(
+            {"groups": serialize_groups(get_groups_queryset().order_by("name"))}
+        )
+
     def delete(self, request, group_id):
         try:
             group = Group.objects.get(pk=group_id)
@@ -491,6 +564,12 @@ class GroupView(SuperuserAPIView):
         if group.user_set.exists():
             return JSONErrorResponse(
                 message=_("A group with members cannot be deleted."),
+                status=HTTPStatus.CONFLICT,
+            )
+        # Deleting it would cut the groups inside it off from those above it.
+        if NestedGroup.objects.filter(parent=group).exists():
+            return JSONErrorResponse(
+                message=_("A group with groups inside it cannot be deleted."),
                 status=HTTPStatus.CONFLICT,
             )
         group.delete()

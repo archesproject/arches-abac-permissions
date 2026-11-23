@@ -6,7 +6,7 @@ from django.utils.translation import gettext as _
 
 from arches.app.utils.response import JSONErrorResponse, JSONResponse
 from arches_abac_permissions.rule_types import ANONYMOUS_USERNAME
-from arches_abac_permissions.views import BadRequest, SuperuserAPIView
+from arches_abac_permissions.views import BadRequest, SuperuserAPIView, parse_id_list
 
 
 def serialize_user(user):
@@ -30,15 +30,6 @@ def serialize_user_details(user):
         "last_login": user.last_login.isoformat() if user.last_login else None,
         "date_joined": user.date_joined.isoformat(),
     }
-
-
-def parse_id_list(body, key):
-    value = body.get(key, [])
-    if not isinstance(value, list) or not all(
-        isinstance(item, int) and not isinstance(item, bool) for item in value
-    ):
-        raise BadRequest(_("“%(key)s” must be a list of ids.") % {"key": key})
-    return set(value)
 
 
 class UsersView(SuperuserAPIView):

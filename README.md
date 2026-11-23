@@ -113,11 +113,28 @@ Migration `0003` registers a **Rule Permissions** plugin (`/plugins/rule-permiss
 
 - **Rules** (left): filter, add, and delete rules.
 - **Rule Configuration** (middle): name and description, plus the fields of the rule type: resource model and lifecycle state for *Resource has Lifecycle State*; a resource set for *Resource is in Resource Set* (only offered when `arches_resource_sets` is installed); a resource model, node and value for *Resource has Node Value*; or a resource model, geometry node, spatial relationship and an area drawn on a map (or entered as GeoJSON) with an optional buffer for *Resource is in Area*. *Search* and *QuerySet* rules are not evaluated yet, so the plugin doesn't offer or list them. To add a rule type, declare a `rule_type` on its rule class and register a front-end module (form + completeness check) in `src/arches_abac_permissions/rule-types/index.ts`. Once a rule is saved, the collapsed **Index SQL** section below its fields shows the SQL for an index that speeds up evaluating it (see [Indexes for rules](#indexes-for-rules)).
-- **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members, or a built-in Arches group (tagged *Built-in*), cannot be deleted. Groups tagged *Public* apply to logged-out visitors, and the plugin warns when such a group is granted access. **Save** stores the rule, its definition and all grants together.
+- **Assign Group Permissions to Rule** (right): turn the rule on or off, and grant Read, Update and Delete (`view_`/`change_`/`delete_resourceinstance`) to groups. Groups can be added and deleted here; a group with members, a group with groups inside it, or a built-in Arches group (tagged *Built-in*), cannot be deleted. Groups tagged *Public* apply to logged-out visitors, and the plugin warns when a grant reaches such a group, directly or through nesting. Under each group, the plugin lists the grants its members also get through nested groups. **Save** stores the rule, its definition and all grants together.
 
 The **Group Membership** view (switch at the top) lists groups, users and an editor. Filter users by group (or those with no group), open one to add or remove its groups, or tick several and choose **Edit groups** to change them together. Changes apply immediately via `api/abac/users` and `api/abac/users/group_membership`.
 
 Only superusers can see the plugin or call its API (`api/abac/...`). An inactive rule grants nothing.
+
+### Nested groups
+
+Groups can sit inside other groups. Nesting is off by default; one setting turns it on and chooses which way rules flow:
+
+```python
+# Default: nesting is off, and no group sits inside another.
+ABAC_NESTED_GROUP_INHERITANCE = "off"
+# Members of a group also get the rules granted to the groups it sits inside.
+ABAC_NESTED_GROUP_INHERITANCE = "from_parents"
+# Members of a group also get the rules granted to the groups inside it.
+ABAC_NESTED_GROUP_INHERITANCE = "from_children"
+```
+
+With nesting on, select a group in **Group Membership** and choose the groups it sits inside; the panel also lists the groups whose rules its members get, nearest first. **Assign Group Permissions to Rule** marks the groups and permissions that come through nesting ("Also gets Read via Department"). Nesting only affects inclusion rules; Django group membership and core Arches permissions are unchanged.
+
+A group can't sit inside itself, directly or through other groups.
 
 ## How inclusion rules work
 
@@ -127,7 +144,7 @@ An inclusion rule has:
 - a **definition**, a JSON object of settings specific to the rule class;
 - one or more **group permissions**, each pairing a Django group with the permissions its members get on matching resources.
 
-When Arches checks a user's permissions on a single resource instance (viewing its report, opening it in the editor, deleting it), the framework adds the permissions from every rule that is assigned to one of the user's groups and that matches the resource.
+When Arches checks a user's permissions on a single resource instance (viewing its report, opening it in the editor, deleting it), the framework adds the permissions from every rule that is assigned to one of the user's groups, or to a group they reach through nesting (see [Nested groups](#nested-groups)), and that matches the resource.
 
 Things to be aware of:
 
@@ -135,7 +152,7 @@ Things to be aware of:
 - **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser user.
 - **Users also need the model-level `read_nodegroup` permission** ("Models | node group | Read") to read a resource. Arches requires this in addition to resource-instance permissions.
 - A group permission with no permissions selected grants nothing, and its rule is not evaluated.
-- **Granting to Guest makes resources public.** Arches signs logged-out visitors in as the `anonymous` user, which belongs to Guest, so a rule granted to Guest (or to any group containing `anonymous`) applies to everyone who isn't logged in.
+- **Granting to Guest makes resources public.** Arches signs logged-out visitors in as the `anonymous` user, which belongs to Guest, so a rule granted to Guest (or to any group containing `anonymous`) applies to everyone who isn't logged in. With nesting, so does a rule granted to any group whose rules Guest inherits.
 
 ### Available rule classes
 
