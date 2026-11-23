@@ -64,6 +64,16 @@ class InclusionRule(models.Model):
         """
         return None
 
+    @classmethod
+    def get_search_filter(cls, inclusion_rule):
+        """
+        Return an Elasticsearch filter on the resources index matching
+        exactly the resources this rule matches, or None if the rule can't be
+        expressed in Elasticsearch. Search then shows none of its resources;
+        an empty bool counts as None rather than matching everything.
+        """
+        return None
+
     def clean(self):
         super().clean()
         if not self.modulename or not self.classname:
@@ -100,6 +110,9 @@ class InclusionRule(models.Model):
 
     def get_matching_resources(self):
         return self.get_class_module().get_matching_resources(self)
+
+    def get_search_filter_for_rule(self):
+        return self.get_class_module().get_search_filter(self)
 
     def get_index_sql_for_rule(self):
         return self.get_class_module().get_index_sql(self)
