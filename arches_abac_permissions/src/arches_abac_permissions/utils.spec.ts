@@ -5,7 +5,10 @@ import {
     userMatchesFilter,
     draftFromRule,
     draftToPayload,
+    grantsBecomePublic,
     groupHoldings,
+    inheritedGrants,
+    nestedGroupIds,
     isDraftComplete,
     newDraft,
     sameDefinition,
@@ -29,10 +32,20 @@ const rule: Rule = {
     index_sql: null,
 };
 
-const groups: Group[] = [
-    { id: 1, name: "A", member_count: 0, is_built_in: false, is_public: false },
-    { id: 2, name: "B", member_count: 0, is_built_in: false, is_public: false },
-];
+function group(id: number, name: string, extra: Partial<Group> = {}): Group {
+    return {
+        id,
+        name,
+        member_count: 0,
+        is_built_in: false,
+        is_public: false,
+        parent_ids: [],
+        inherits_from_ids: [],
+        ...extra,
+    };
+}
+
+const groups: Group[] = [group(1, "A"), group(2, "B")];
 
 describe("drafts", () => {
     it("normalizes permission order when loading a rule", () => {
@@ -152,5 +165,44 @@ describe("user helpers", () => {
         expect(userDisplayName({ ...a, first_name: "", last_name: "" })).toBe(
             "u1",
         );
+    });
+});
+
+describe("inheritedGrants", () => {
+    const nested = [
+        group(1, "Inner", { inherits_from_ids: [2] }),
+        group(2, "Outer"),
+    ];
+
+    it("lists grants from the groups a group inherits from", () => {
+        expect(inheritedGrants(draftFromRule(rule), nested, 1)).toEqual([
+            { via: nested[1], permissions: ["read", "delete"] },
+        ]);
+    });
+
+    it("is empty without inheritance or grants", () => {
+        expect(inheritedGrants(draftFromRule(rule), nested, 2)).toEqual([]);
+        const ungranted = draftFromRule({ ...rule, group_permissions: [] });
+        expect(inheritedGrants(ungranted, nested, 1)).toEqual([]);
+    });
+});
+
+describe("nested group helpers", () => {
+    const nested = [
+        group(1, "Guest", { is_public: true, inherits_from_ids: [2, 3] }),
+        group(2, "Staff", { parent_ids: [1] }),
+        group(3, "Team", { parent_ids: [2] }),
+        group(4, "Other"),
+    ];
+
+    it("finds grants that reach a public group through nesting", () => {
+        expect(grantsBecomePublic(nested, 1)).toBe(true);
+        expect(grantsBecomePublic(nested, 3)).toBe(true);
+        expect(grantsBecomePublic(nested, 4)).toBe(false);
+    });
+
+    it("lists the groups inside a group at any depth", () => {
+        expect(nestedGroupIds(nested, 1)).toEqual(new Set([2, 3]));
+        expect(nestedGroupIds(nested, 3)).toEqual(new Set());
     });
 });

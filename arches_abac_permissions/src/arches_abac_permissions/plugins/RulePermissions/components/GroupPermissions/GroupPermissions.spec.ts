@@ -1,9 +1,21 @@
 import { mount } from "@vue/test-utils";
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { defineComponent, h } from "vue";
 
 import GroupPermissions from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupPermissions/GroupPermissions.vue";
 import { newDraft } from "@/arches_abac_permissions/utils.ts";
+
+vi.mock("vue3-gettext", () => ({
+    useGettext: () => ({
+        $gettext: (text: string, values: Record<string, string> = {}) => {
+            let translated = text;
+            for (const [key, value] of Object.entries(values)) {
+                translated = translated.replaceAll(`%{${key}}`, value);
+            }
+            return translated;
+        },
+    }),
+}));
 
 const CheckboxStub = defineComponent({
     props: { modelValue: Boolean, ariaLabel: String },
@@ -28,12 +40,12 @@ const groups = [
     { id: 2, name: "Viewers", member_count: 0 },
 ];
 
-function mountComponent() {
+function mountComponent(groupList: object[] = groups) {
     const draft = newDraft("lifecycle_state");
     const wrapper = mount(GroupPermissions, {
         props: {
             modelValue: draft,
-            groups,
+            groups: groupList,
             canSave: true,
             isDirty: true,
             isSaving: false,
@@ -52,9 +64,7 @@ function mountComponent() {
 describe("GroupPermissions", () => {
     it("toggles a single permission", async () => {
         const { wrapper, draft } = mountComponent();
-        const box = wrapper.find(
-            "input[aria-label='%{permission} for %{group}']",
-        );
+        const box = wrapper.find("input[aria-label='Read for Editors']");
         await box.setValue(true);
         expect(draft.grants[1]).toEqual(["read"]);
     });
@@ -88,5 +98,60 @@ describe("GroupPermissions", () => {
         expect(rowToggle().text()).toBe("Clear selection");
         await rowToggle().trigger("click");
         expect(draft.grants[1]).toEqual([]);
+    });
+
+    it("shows grants a group gets through nesting", async () => {
+        const { wrapper, draft } = mountComponent([
+            { id: 1, name: "Inner", member_count: 0, inherits_from_ids: [2] },
+            { id: 2, name: "Outer", member_count: 0, inherits_from_ids: [] },
+        ]);
+        await wrapper.setProps({
+            modelValue: { ...draft, grants: { 2: ["read"] } },
+        });
+        const rows = wrapper.findAll("tbody tr");
+        expect(rows[0].find(".inherited").text()).toBe(
+            "Also gets Read via Outer",
+        );
+        expect(rows[1].find(".inherited").exists()).toBe(false);
+    });
+
+    it("warns when grants reach a public group through nesting", async () => {
+        const { wrapper, draft } = mountComponent([
+            { id: 1, name: "Staff", member_count: 0, inherits_from_ids: [] },
+            {
+                id: 2,
+                name: "Guest",
+                member_count: 0,
+                is_public: true,
+                inherits_from_ids: [1],
+            },
+        ]);
+        expect(wrapper.find(".public-warning").exists()).toBe(false);
+        await wrapper.setProps({
+            modelValue: { ...draft, grants: { 1: ["read"] } },
+        });
+        expect(wrapper.find(".public-warning").exists()).toBe(true);
+    });
+
+    it("marks groups and permissions they get through nesting", async () => {
+        const { wrapper, draft } = mountComponent([
+            { id: 1, name: "Inner", member_count: 0, inherits_from_ids: [2] },
+            { id: 2, name: "Outer", member_count: 0, inherits_from_ids: [] },
+        ]);
+        await wrapper.setProps({
+            modelValue: {
+                ...draft,
+                grants: { 1: ["update"], 2: ["read", "update"] },
+            },
+        });
+        const [inner, outer] = wrapper.findAll("tbody tr");
+        expect(inner.classes()).toContain("inherits");
+        expect(outer.classes()).not.toContain("inherits");
+        // Read comes only through Outer; Update is also granted directly.
+        expect(
+            inner
+                .findAll(".inherited-mark")
+                .map((mark) => mark.attributes("aria-label")),
+        ).toEqual(["Read inherited via Outer"]);
     });
 });

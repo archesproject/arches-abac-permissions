@@ -15,6 +15,7 @@ import {
     fetchUsers,
 } from "@/arches_abac_permissions/api.ts";
 import AddUsersDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/AddUsersDialog/AddUsersDialog.vue";
+import ParentGroupsEditor from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupMembership/components/ParentGroupsEditor/ParentGroupsEditor.vue";
 import GroupTags from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupTags/GroupTags.vue";
 import {
     DEFAULT_ERROR_TOAST_LIFE,
@@ -36,10 +37,15 @@ const { $gettext } = useGettext();
 const noGroupsLabel = $gettext("<no groups>");
 const toast = useToast();
 
-const props = defineProps<{ groups: Group[] }>();
+const props = defineProps<{
+    groups: Group[];
+    isSavingParents: boolean;
+    nestingEnabled: boolean;
+}>();
 const emit = defineEmits<{
     (e: "add-group"): void;
     (e: "delete-group", group: Group): void;
+    (e: "update-parents", groupId: number, parentIds: number[]): void;
 }>();
 
 const users = ref<User[]>([]);
@@ -94,6 +100,11 @@ const visibleUsers = computed(() =>
     }),
 );
 
+const selectedGroup = computed(() =>
+    typeof groupFilter.value === "number"
+        ? groupsById.value.get(groupFilter.value)
+        : undefined,
+);
 const activeUser = computed(
     () => users.value.find((user) => user.id === activeId.value) ?? null,
 );
@@ -128,6 +139,12 @@ const addableGroups = computed(() => {
     );
     return props.groups.filter((group) => !full.has(group.id));
 });
+
+function updateParents(parentIds: number[]): void {
+    if (selectedGroup.value) {
+        emit("update-parents", selectedGroup.value.id, parentIds);
+    }
+}
 
 function toggleFilter(value: number | typeof UNGROUPED): void {
     groupFilter.value = groupFilter.value === value ? null : value;
@@ -263,71 +280,85 @@ async function loadActiveUserDetails(): Promise<void> {
                     />
                 </span>
             </header>
-            <ul class="item-list">
-                <li
-                    v-for="group in groups"
-                    :key="group.id"
-                    class="item-row"
-                    :class="{ selected: groupFilter === group.id }"
-                >
-                    <button
-                        type="button"
-                        class="item-select"
-                        :aria-pressed="groupFilter === group.id"
-                        @click="toggleFilter(group.id)"
+            <div class="groups-body">
+                <ul class="item-list">
+                    <li
+                        v-for="group in groups"
+                        :key="group.id"
+                        class="item-row"
+                        :class="{ selected: groupFilter === group.id }"
                     >
-                        <i
-                            class="pi pi-users row-icon"
-                            aria-hidden="true"
-                        ></i>
-                        <span class="item-name">{{ group.name }}</span>
-                        <GroupTags
-                            :is-built-in="group.is_built_in"
-                            :is-public="group.is_public"
-                        />
-                        <span class="group-count">{{
-                            memberCounts.get(group.id) ?? 0
-                        }}</span>
-                    </button>
-                    <button
-                        v-if="!group.is_built_in"
-                        type="button"
-                        class="row-delete"
-                        :title="$gettext('Delete group')"
-                        :aria-label="
-                            $gettext('Delete group %{name}', {
-                                name: group.name,
-                            })
-                        "
-                        @click="emit('delete-group', group)"
+                        <button
+                            type="button"
+                            class="item-select"
+                            :aria-pressed="groupFilter === group.id"
+                            @click="toggleFilter(group.id)"
+                        >
+                            <i
+                                class="pi pi-users row-icon"
+                                aria-hidden="true"
+                            ></i>
+                            <span class="item-name">{{ group.name }}</span>
+                            <GroupTags
+                                :is-built-in="group.is_built_in"
+                                :is-public="group.is_public"
+                            />
+                            <span class="group-count">{{
+                                memberCounts.get(group.id) ?? 0
+                            }}</span>
+                        </button>
+                        <button
+                            v-if="!group.is_built_in"
+                            type="button"
+                            class="row-delete"
+                            :title="$gettext('Delete group')"
+                            :aria-label="
+                                $gettext('Delete group %{name}', {
+                                    name: group.name,
+                                })
+                            "
+                            @click="emit('delete-group', group)"
+                        >
+                            <i
+                                class="pi pi-trash"
+                                aria-hidden="true"
+                            ></i>
+                        </button>
+                    </li>
+                    <li
+                        class="item-row ungrouped"
+                        :class="{ selected: groupFilter === UNGROUPED }"
                     >
-                        <i
-                            class="pi pi-trash"
-                            aria-hidden="true"
-                        ></i>
-                    </button>
-                </li>
-                <li
-                    class="item-row ungrouped"
-                    :class="{ selected: groupFilter === UNGROUPED }"
-                >
-                    <button
-                        type="button"
-                        class="item-select"
-                        :aria-pressed="groupFilter === UNGROUPED"
-                        @click="toggleFilter(UNGROUPED)"
-                    >
-                        <i
-                            class="pi pi-ban row-icon"
-                            aria-hidden="true"
-                        ></i>
-                        <span class="item-name">{{
-                            $gettext("No group affiliation")
-                        }}</span>
-                        <span class="group-count">{{ ungroupedCount }}</span>
-                    </button>
-                </li>
-            </ul>
+                        <button
+                            type="button"
+                            class="item-select"
+                            :aria-pressed="groupFilter === UNGROUPED"
+                            @click="toggleFilter(UNGROUPED)"
+                        >
+                            <i
+                                class="pi pi-ban row-icon"
+                                aria-hidden="true"
+                            ></i>
+                            <span class="item-name">{{
+                                $gettext("No group affiliation")
+                            }}</span>
+                            <span class="group-count">{{
+                                ungroupedCount
+                            }}</span>
+                        </button>
+                    </li>
+                </ul>
+                <ParentGroupsEditor
+                    v-if="selectedGroup && nestingEnabled"
+                    :group-id="selectedGroup.id"
+                    :group-name="selectedGroup.name"
+                    :parent-ids="selectedGroup.parent_ids"
+                    :inherits-from-ids="selectedGroup.inherits_from_ids"
+                    :groups="groups"
+                    :saving="isSavingParents"
+                    @update-parents="updateParents"
+                />
+            </div>
         </section>
 
         <section
@@ -789,6 +820,16 @@ async function loadActiveUserDetails(): Promise<void> {
     padding: 0 0.5rem;
     overflow-y: auto;
     flex: 1;
+}
+
+/* The column's grid has one row below the header, so the list and the
+   parent picker share it. */
+.groups-body {
+    flex: 1;
+    min-block-size: 0;
+    min-inline-size: 0;
+    display: flex;
+    flex-direction: column;
 }
 
 .user-body {

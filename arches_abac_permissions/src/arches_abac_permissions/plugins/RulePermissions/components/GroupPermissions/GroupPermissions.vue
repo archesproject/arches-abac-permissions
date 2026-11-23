@@ -9,7 +9,9 @@ import ToggleSwitch from "openvue/toggleswitch";
 import GroupTags from "@/arches_abac_permissions/plugins/RulePermissions/components/GroupTags/GroupTags.vue";
 import { PERMISSION_NAMES } from "@/arches_abac_permissions/constants.ts";
 import {
+    grantsBecomePublic,
     hasPermission,
+    inheritedGrants,
     setGroupPermissions,
     setPermission,
     setPermissionForAllGroups,
@@ -17,6 +19,7 @@ import {
 
 import type {
     Group,
+    InheritedGrant,
     PermissionName,
     RuleDraft,
 } from "@/arches_abac_permissions/types";
@@ -72,8 +75,64 @@ function hasAny(groupId: number): boolean {
 }
 
 const publicGrantees = computed(() =>
-    props.groups.filter((group) => group.is_public && hasAny(group.id)),
+    props.groups.filter(
+        (group) =>
+            hasAny(group.id) && grantsBecomePublic(props.groups, group.id),
+    ),
 );
+
+const inheritedByGroup = computed(() => {
+    const inherited = new Map<number, InheritedGrant[]>();
+    if (draft.value) {
+        for (const group of props.groups) {
+            inherited.set(
+                group.id,
+                inheritedGrants(draft.value, props.groups, group.id),
+            );
+        }
+    }
+    return inherited;
+});
+
+function inheritedLabel(groupId: number): string | null {
+    const inherited = inheritedByGroup.value.get(groupId) ?? [];
+    if (inherited.length === 0) {
+        return null;
+    }
+    return $gettext("Also gets %{grants}", {
+        grants: inherited
+            .map(({ via, permissions }) =>
+                $gettext("%{permissions} via %{group}", {
+                    permissions: permissions.map(permissionLabel).join(", "),
+                    group: via.name,
+                }),
+            )
+            .join("; "),
+    });
+}
+
+// Only for permissions the group gets through nesting and not directly.
+function inheritedVia(
+    groupId: number,
+    permission: PermissionName,
+): string | undefined {
+    if (!draft.value || hasPermission(draft.value, groupId, permission)) {
+        return undefined;
+    }
+    const via = [];
+    for (const grant of inheritedByGroup.value.get(groupId) ?? []) {
+        if (grant.permissions.includes(permission)) {
+            via.push(grant.via.name);
+        }
+    }
+    if (via.length === 0) {
+        return undefined;
+    }
+    return $gettext("%{permission} inherited via %{groups}", {
+        permission: permissionLabel(permission),
+        groups: via.join(", "),
+    });
+}
 
 function toggleGroup(groupId: number): void {
     if (draft.value) {
@@ -150,7 +209,7 @@ function toggleGroup(groupId: number): void {
                 ></i>
                 {{
                     $gettext(
-                        "%{groups} includes visitors who are not logged in, so resources matching this rule become public.",
+                        "%{groups} reaches visitors who are not logged in, so resources matching this rule become public.",
                         {
                             groups: publicGrantees
                                 .map((group) => group.name)
@@ -237,6 +296,7 @@ function toggleGroup(groupId: number): void {
                         <tr
                             v-for="group in groups"
                             :key="group.id"
+                            :class="{ inherits: inheritedLabel(group.id) }"
                         >
                             <th
                                 scope="row"
@@ -249,6 +309,12 @@ function toggleGroup(groupId: number): void {
                                             :is-built-in="group.is_built_in"
                                             :is-public="group.is_public"
                                         />
+                                    </span>
+                                    <span
+                                        v-if="inheritedLabel(group.id)"
+                                        class="inherited"
+                                    >
+                                        {{ inheritedLabel(group.id) }}
                                     </span>
                                     <button
                                         type="button"
@@ -279,31 +345,51 @@ function toggleGroup(groupId: number): void {
                                 :key="permission"
                                 class="check-cell"
                             >
-                                <Checkbox
-                                    :binary="true"
-                                    :model-value="
-                                        hasPermission(
-                                            draft,
-                                            group.id,
-                                            permission,
-                                        )
-                                    "
-                                    :aria-label="
-                                        $gettext('%{permission} for %{group}', {
-                                            permission:
-                                                permissionLabel(permission),
-                                            group: group.name,
-                                        })
-                                    "
-                                    @update:model-value="
-                                        setPermission(
-                                            draft,
-                                            group.id,
-                                            permission,
-                                            $event,
-                                        )
-                                    "
-                                />
+                                <span class="check-content">
+                                    <Checkbox
+                                        :binary="true"
+                                        :model-value="
+                                            hasPermission(
+                                                draft,
+                                                group.id,
+                                                permission,
+                                            )
+                                        "
+                                        :aria-label="
+                                            $gettext(
+                                                '%{permission} for %{group}',
+                                                {
+                                                    permission:
+                                                        permissionLabel(
+                                                            permission,
+                                                        ),
+                                                    group: group.name,
+                                                },
+                                            )
+                                        "
+                                        @update:model-value="
+                                            setPermission(
+                                                draft,
+                                                group.id,
+                                                permission,
+                                                $event,
+                                            )
+                                        "
+                                    />
+                                    <i
+                                        v-if="
+                                            inheritedVia(group.id, permission)
+                                        "
+                                        class="pi pi-sitemap inherited-mark"
+                                        role="img"
+                                        :aria-label="
+                                            inheritedVia(group.id, permission)
+                                        "
+                                        :title="
+                                            inheritedVia(group.id, permission)
+                                        "
+                                    ></i>
+                                </span>
                             </td>
                             <td class="action-cell">
                                 <button
@@ -436,6 +522,7 @@ function toggleGroup(groupId: number): void {
 
 .group-name {
     display: flex;
+    flex-wrap: wrap;
     align-items: center;
     gap: 0.6rem;
     min-inline-size: 0;
@@ -449,6 +536,41 @@ function toggleGroup(groupId: number): void {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.inherited {
+    flex-basis: 100%;
+    order: 1;
+    font-size: 1.1rem;
+    font-weight: 600;
+    color: var(--p-abac-brand-light);
+}
+
+.grants tbody tr.inherits {
+    background: var(--p-abac-accent-tint);
+}
+
+.grants tbody tr.inherits .name-cell {
+    border-inline-start: 0.3rem solid var(--p-abac-accent);
+}
+
+/* Equal outer columns keep every checkbox centred, with or without a marker. */
+.check-content {
+    display: grid;
+    grid-template-columns: 1fr auto 1fr;
+    align-items: center;
+    gap: 0.4rem;
+}
+
+.check-content > :first-child {
+    grid-column: 2;
+}
+
+.inherited-mark {
+    grid-column: 3;
+    justify-self: start;
+    font-size: 1.1rem;
+    color: var(--p-abac-accent);
 }
 
 .grant-button {

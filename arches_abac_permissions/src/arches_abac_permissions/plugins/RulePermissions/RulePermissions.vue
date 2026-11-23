@@ -15,6 +15,7 @@ import {
     fetchGroups,
     fetchRuleTypes,
     fetchRules,
+    setGroupParents,
     updateRule,
 } from "@/arches_abac_permissions/api.ts";
 import AddGroupDialog from "@/arches_abac_permissions/plugins/RulePermissions/components/AddGroupDialog/AddGroupDialog.vue";
@@ -38,6 +39,7 @@ import {
 
 import type {
     Group,
+    Nesting,
     Rule,
     RuleDraft,
     RuleTypeInfo,
@@ -50,6 +52,8 @@ const toast = useToast();
 const rules = ref<Rule[]>([]);
 const groups = ref<Group[]>([]);
 const ruleTypes = ref<RuleTypeInfo[]>([]);
+const isSavingParents = ref(false);
+const nesting = ref<Nesting>("off");
 const isLoading = ref(true);
 const isSaving = ref(false);
 const showAddGroup = ref(false);
@@ -220,9 +224,11 @@ function requestDeleteGroup(group: Group): void {
                 showError($gettext("Unable to delete group"), error);
                 return;
             }
-            groups.value = groups.value.filter(
-                (existing) => existing.id !== group.id,
-            );
+            try {
+                groups.value = sortGroups((await fetchGroups()).groups);
+            } catch (error) {
+                showError($gettext("Unable to load groups"), error);
+            }
             rules.value = rules.value.map((rule) => ({
                 ...rule,
                 group_permissions: rule.group_permissions.filter(
@@ -238,6 +244,23 @@ function requestDeleteGroup(group: Group): void {
             }
         },
     );
+}
+
+async function updateGroupParents(
+    groupId: number,
+    parentIds: number[],
+): Promise<void> {
+    isSavingParents.value = true;
+    try {
+        groups.value = sortGroups(await setGroupParents(groupId, parentIds));
+    } catch (error) {
+        showError(
+            $gettext("Unable to change the group's parent groups"),
+            error,
+        );
+    } finally {
+        isSavingParents.value = false;
+    }
 }
 
 function onGroupCreated(group: Group): void {
@@ -268,7 +291,8 @@ async function loadData(): Promise<void> {
             fetchRuleTypes(),
         ]);
         rules.value = sortRules(loadedRules);
-        groups.value = sortGroups(loadedGroups);
+        groups.value = sortGroups(loadedGroups.groups);
+        nesting.value = loadedGroups.nesting;
         ruleTypes.value = loadedTypes;
     } catch (error) {
         showError($gettext("Unable to load rule permissions"), error);
@@ -320,8 +344,11 @@ async function loadData(): Promise<void> {
             <GroupMembership
                 v-show="mode === 'membership'"
                 :groups="groups"
+                :is-saving-parents="isSavingParents"
+                :nesting-enabled="nesting !== 'off'"
                 @add-group="showAddGroup = true"
                 @delete-group="requestDeleteGroup"
+                @update-parents="updateGroupParents"
             />
             <div
                 v-show="mode === 'rule'"

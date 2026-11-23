@@ -3,6 +3,7 @@ import Cookies from "js-cookie";
 
 import type {
     Group,
+    Nesting,
     Rule,
     RuleTypeInfo,
     User,
@@ -65,11 +66,20 @@ export const fetchRuleTypes = async () =>
     (await request<{ rule_types: RuleTypeInfo[] }>(arches.urls.abac_rule_types))
         .rule_types;
 
-export const fetchGroups = async () =>
-    (await request<{ groups: Group[] }>(arches.urls.abac_groups)).groups;
+export const fetchGroups = () =>
+    request<{ groups: Group[]; nesting: Nesting }>(arches.urls.abac_groups);
 
 export const createGroup = (name: string) =>
     request<Group>(arches.urls.abac_groups, "POST", { name });
+
+export const setGroupParents = async (groupId: number, parentIds: number[]) =>
+    (
+        await request<{ groups: Group[] }>(
+            arches.urls.abac_group(groupId),
+            "PUT",
+            { parent_ids: parentIds },
+        )
+    ).groups;
 
 export const deleteGroup = (groupId: number) =>
     request<void>(arches.urls.abac_group(groupId), "DELETE");

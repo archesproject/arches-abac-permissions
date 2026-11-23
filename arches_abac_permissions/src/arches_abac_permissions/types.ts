@@ -33,9 +33,22 @@ export interface Group {
     member_count: number;
     is_built_in: boolean;
     is_public: boolean;
+    // Groups this group sits inside.
+    parent_ids: number[];
+    // Groups whose rules this group's members also get through nesting.
+    inherits_from_ids: number[];
 }
 
 // Editable copy of a rule; `id` is null until the rule is saved.
+// Permissions a group's members also get through a group they inherit from.
+export interface InheritedGrant {
+    via: Group;
+    permissions: PermissionName[];
+}
+
+// ABAC_NESTED_GROUP_INHERITANCE: which way nested groups pass on rules, if at all.
+export type Nesting = "off" | "from_parents" | "from_children";
+
 export interface RuleDraft {
     id: string | null;
     rule_type: string;

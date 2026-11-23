@@ -4,6 +4,7 @@ import { getRuleTypeForKey } from "@/arches_abac_permissions/rule-types/index.ts
 import type {
     User,
     Group,
+    InheritedGrant,
     PermissionName,
     Rule,
     RuleDefinition,
@@ -185,4 +186,51 @@ export function groupHoldings(
         }
     }
     return [...counts].map(([groupId, count]) => ({ groupId, count }));
+}
+
+// Grants `groupId`'s members also get through nested groups.
+export function inheritedGrants(
+    draft: RuleDraft,
+    groups: Group[],
+    groupId: number,
+): InheritedGrant[] {
+    const inheritsFrom =
+        groups.find((group) => group.id === groupId)?.inherits_from_ids ?? [];
+    const inherited: InheritedGrant[] = [];
+    for (const via of groups) {
+        const permissions = draft.grants[via.id] ?? [];
+        if (inheritsFrom.includes(via.id) && permissions.length > 0) {
+            inherited.push({ via, permissions });
+        }
+    }
+    return inherited;
+}
+
+// Whether `groupId`'s grants reach logged-out visitors, directly or through
+// a public group that inherits from it.
+export function grantsBecomePublic(groups: Group[], groupId: number): boolean {
+    return groups.some(
+        (group) =>
+            group.is_public &&
+            (group.id === groupId || group.inherits_from_ids.includes(groupId)),
+    );
+}
+
+// Groups that sit inside `groupId`, directly or further down.
+export function nestedGroupIds(groups: Group[], groupId: number): Set<number> {
+    const nested = new Set<number>();
+    let added = true;
+    while (added) {
+        added = false;
+        for (const group of groups) {
+            const isInside = group.parent_ids.some(
+                (parentId) => parentId === groupId || nested.has(parentId),
+            );
+            if (isInside && !nested.has(group.id)) {
+                nested.add(group.id);
+                added = true;
+            }
+        }
+    }
+    return nested;
 }
