@@ -131,7 +131,7 @@ When Arches checks a user's permissions on a single resource instance (viewing i
 
 Things to be aware of:
 
-- **SQL-based search (arches-search) honors inclusion rules; Elasticsearch search does not yet.** Rules apply to single-resource permission checks and to `filter_resource_queryset`, which arches-search uses. Resources a user can access through a rule will not yet appear in core Arches search results or on the search map.
+- **Where rules apply.** Every rule applies to single-resource permission checks, to arches-search (`filter_resource_queryset`) and, through `get_filtered_instances`, to map tiles, related resources and the geo and resource APIs. Elasticsearch search (the core search page) only uses a rule whose type provides an Elasticsearch filter (`get_search_filter`); the plugin marks other rules *Not in Elasticsearch*. A rule that can't be evaluated (for example a search that no longer runs) grants nothing, and the plugin marks it *Grants nothing* with the reason.
 - **Superusers bypass permission checks**, so rules have no visible effect for them. Test with a non-superuser user.
 - **Users also need the model-level `read_nodegroup` permission** ("Models | node group | Read") to read a resource. Arches requires this in addition to resource-instance permissions.
 - A group permission with no permissions selected grants nothing, and its rule is not evaluated.
@@ -380,6 +380,14 @@ class MyRule(InclusionRule):
         # Return True if `resource` matches the rule. Used for
         # single-resource checks; usually
         # cls.get_matching_resources(inclusion_rule).filter(pk=resource.pk).exists()
+        ...
+
+    @classmethod
+    def get_search_filter(cls, inclusion_rule):
+        # Return an Elasticsearch filter (arches.app.search.elasticsearch_dsl_builder)
+        # matching the same resources, so Elasticsearch search uses the rule.
+        # Optional; the default returns None and the plugin marks the rule
+        # "Not in Elasticsearch".
         ...
 
     @classmethod
