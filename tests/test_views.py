@@ -12,7 +12,6 @@ from arches.app.models.system_settings import settings
 from arches_abac_permissions.models import InclusionRule, InclusionRuleGroupPermission
 from arches_abac_permissions.rules.lifecycle_state_rule import LifecycleStateRule
 from tests.test_inclusion_rules import LifecycleTestCase, make_rule
-from tests.test_search_filters import lifecycle_filter
 
 
 class ApiTestCase(LifecycleTestCase):
@@ -124,10 +123,7 @@ class RuleApiTests(ApiTestCase):
         self.assertEqual(self.send("delete", url).status_code, 404)
         self.assertTrue(InclusionRule.objects.filter(pk=rule.pk).exists())
 
-    @mock.patch.object(
-        LifecycleStateRule, "get_search_filter", side_effect=lifecycle_filter
-    )
-    def test_rules_say_whether_search_uses_them(self, _search_filter):
+    def test_rules_say_whether_search_uses_them(self):
         searchable = self.create_rule()
         unsearchable = make_rule(
             modulename="tile_node_value_rule.py", classname="TileNodeValueRule"
