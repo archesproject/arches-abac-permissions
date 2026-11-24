@@ -16,6 +16,7 @@ from arches.app.models.models import (
     Node,
     ResourceInstance,
 )
+from arches.app.search.elasticsearch_dsl_builder import Bool, Nested, Term
 from arches_abac_permissions.models import InclusionRule
 from arches_abac_permissions.rule_types import RuleType
 
@@ -108,6 +109,52 @@ class SpatialRule(InclusionRule):
             .filter(resourceinstance=resource)
             .exists()
         )
+
+    @classmethod
+    def get_search_filter(cls, inclusion_rule):
+        node, area, operator = cls.parse_definition(inclusion_rule.definition)
+        if operator == CENTROID:
+            return None
+        # The search index keeps geometries by nodegroup, not by node.
+        if (
+            Node.objects.filter(
+                nodegroup_id=node.nodegroup_id, datatype=GEOMETRY_DATATYPE
+            )
+            .exclude(pk=node.pk)
+            .exists()
+        ):
+            return None
+
+        def node_geometries(relation, matches):
+            shape = {
+                "geo_shape": {
+                    "geometries.geom.features.geometry": {
+                        "shape": json.loads(area.geojson),
+                        "relation": relation,
+                    }
+                }
+            }
+            query = (
+                Bool()
+                .filter(
+                    Term(field="geometries.nodegroup_id", term=str(node.nodegroup_id))
+                )
+                .must_not(Term(field="geometries.provisional", term=True))
+            )
+            if matches:
+                query.filter(shape)
+            else:
+                query.must_not(shape)
+            return Nested(path="geometries", query=query)
+
+        search_filter = (
+            Bool()
+            .filter(Term(field="graph_id", term=str(node.graph_id)))
+            .filter(node_geometries(INTERSECTS, matches=True))
+        )
+        if operator == WITHIN:
+            search_filter.must_not(node_geometries(WITHIN, matches=False))
+        return search_filter
 
     @staticmethod
     def matching_geometries(node, area, operator):
