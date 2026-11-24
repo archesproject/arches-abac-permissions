@@ -1,6 +1,7 @@
 from dataclasses import dataclass, field, replace
 
 from django.apps import apps
+from django.conf import settings
 
 
 @dataclass(frozen=True)
@@ -16,12 +17,19 @@ class RuleType:
     icon: str
     definition_keys: tuple[str, ...]
     required_app: str | None = None
+    requires_elasticsearch: bool = False
     modulename: str = field(default="", compare=False)
     classname: str = field(default="", compare=False)
 
     @property
     def available(self):
-        return self.required_app is None or apps.is_installed(self.required_app)
+        if self.required_app and not apps.is_installed(self.required_app):
+            return False
+        return not self.requires_elasticsearch or elasticsearch_enabled()
+
+
+def elasticsearch_enabled():
+    return getattr(settings, "ELASTICSEARCH_ENABLED", True)
 
 
 def _rule_classes(base):

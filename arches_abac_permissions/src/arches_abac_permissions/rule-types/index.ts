@@ -1,3 +1,4 @@
+import elasticsearch from "@/arches_abac_permissions/rule-types/elasticsearch/index.ts";
 import lifecycleState from "@/arches_abac_permissions/rule-types/lifecycle-state/index.ts";
 import resourceSet from "@/arches_abac_permissions/rule-types/resource-set/index.ts";
 import spatial from "@/arches_abac_permissions/rule-types/spatial/index.ts";
@@ -11,6 +12,7 @@ const RULE_TYPE_MODULES: RuleTypeModule[] = [
     resourceSet,
     tileNodeValue,
     spatial,
+    elasticsearch,
 ];
 
 export function getRuleTypeForKey(key: string | null | undefined) {
