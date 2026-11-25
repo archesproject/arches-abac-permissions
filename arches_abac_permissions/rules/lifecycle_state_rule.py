@@ -10,6 +10,7 @@ from arches.app.models.models import (
     ResourceInstance,
     ResourceInstanceLifecycleState,
 )
+from arches.app.search.elasticsearch_dsl_builder import Bool, Term
 from arches_abac_permissions.models import InclusionRule
 from arches_abac_permissions.rule_types import RuleType
 
@@ -50,6 +51,17 @@ class LifecycleStateRule(InclusionRule):
         graph, state = cls.parse_definition(inclusion_rule.definition)
         return ResourceInstance.objects.filter(
             graph=graph, resource_instance_lifecycle_state=state
+        )
+
+    @classmethod
+    def get_search_filter(cls, inclusion_rule):
+        graph, state = cls.parse_definition(inclusion_rule.definition)
+        return (
+            Bool()
+            .filter(Term(field="graph_id", term=str(graph.pk)))
+            .filter(
+                Term(field="resource_instance_lifecycle_state_id", term=str(state.pk))
+            )
         )
 
     @classmethod
