@@ -93,6 +93,18 @@ def serialize_rule(rule):
         index_sql = rule.get_index_sql_for_rule()
     except ValidationError:
         index_sql = None
+    problem = None
+    # None when Elasticsearch is off: no search to leave rules out of.
+    in_es_search = None
+    if getattr(settings, "ELASTICSEARCH_ENABLED", True):
+        try:
+            in_es_search = rule.has_search_filter_for_rule()
+        except ValidationError as error:
+            in_es_search = False
+            problem = " ".join(error.messages)
+        except Exception:
+            in_es_search = False
+            problem = _("The rule can't be evaluated.")
     return {
         "id": str(rule.pk),
         "name": rule.name,
@@ -102,6 +114,8 @@ def serialize_rule(rule):
         "definition": rule.definition,
         "group_permissions": group_permissions,
         "index_sql": index_sql,
+        "in_es_search": in_es_search,
+        "problem": problem,
     }
 
 

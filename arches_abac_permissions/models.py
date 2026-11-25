@@ -1,4 +1,5 @@
 import uuid
+from functools import lru_cache
 
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
@@ -8,6 +9,12 @@ from django.utils.translation import gettext_lazy as _
 
 from arches.app.utils.module_importer import get_class_from_modulename
 from arches_abac_permissions.const import RuleExtensionType
+
+
+@lru_cache(maxsize=None)
+def get_rule_class(modulename, classname):
+    # The importer searches every app's rules folder on each call.
+    return get_class_from_modulename(modulename, classname, RuleExtensionType.RULES)
 
 
 class InclusionRule(models.Model):
@@ -26,9 +33,7 @@ class InclusionRule(models.Model):
     created = models.DateTimeField(auto_now_add=True)
 
     def get_class_module(self):
-        return get_class_from_modulename(
-            self.modulename, self.classname, RuleExtensionType.RULES
-        )
+        return get_rule_class(self.modulename, self.classname)
 
     @classmethod
     def clean_definition(cls, raw_definition, definition_keys):
@@ -58,6 +63,21 @@ class InclusionRule(models.Model):
         None if no additional index is needed.
         """
         return None
+
+    @classmethod
+    def get_search_filter(cls, inclusion_rule):
+        """
+        Return an Elasticsearch filter on the resources index matching
+        exactly the resources this rule matches, or None if the rule can't be
+        expressed in Elasticsearch. Search then shows none of its resources;
+        an empty bool counts as None rather than matching everything.
+        """
+        return None
+
+    @classmethod
+    def has_search_filter(cls, inclusion_rule):
+        """Whether Elasticsearch search can use this rule. Override when cheaper."""
+        return cls.get_search_filter(inclusion_rule) is not None
 
     def clean(self):
         super().clean()
@@ -95,6 +115,12 @@ class InclusionRule(models.Model):
 
     def get_matching_resources(self):
         return self.get_class_module().get_matching_resources(self)
+
+    def has_search_filter_for_rule(self):
+        return self.get_class_module().has_search_filter(self)
+
+    def get_search_filter_for_rule(self):
+        return self.get_class_module().get_search_filter(self)
 
     def get_index_sql_for_rule(self):
         return self.get_class_module().get_index_sql(self)

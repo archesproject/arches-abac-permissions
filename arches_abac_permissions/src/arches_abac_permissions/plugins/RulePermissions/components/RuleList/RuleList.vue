@@ -20,6 +20,9 @@ const MAX_VISIBLE_GROUPS = 2;
 
 const { $gettext } = useGettext();
 const noGroupsLabel = $gettext("<no groups assigned>");
+const notInSearchHelp = $gettext(
+    "Elasticsearch search doesn't use this rule; records, maps and arches-search still do.",
+);
 
 const props = defineProps<{
     rules: Rule[];
@@ -137,6 +140,20 @@ const rows = computed(() =>
                                 }}
                             </span>
                             <span class="type-badge">{{ row.typeLabel }}</span>
+                            <span
+                                v-if="row.rule.problem"
+                                class="status-badge"
+                                :title="row.rule.problem"
+                            >
+                                {{ $gettext("Grants nothing") }}
+                            </span>
+                            <span
+                                v-else-if="row.rule.in_es_search === false"
+                                class="status-badge"
+                                :title="notInSearchHelp"
+                            >
+                                {{ $gettext("Not in Elasticsearch") }}
+                            </span>
                         </span>
                         <span class="groups-line">
                             <span
