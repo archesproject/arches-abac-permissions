@@ -5,7 +5,7 @@ from unittest import mock, skipIf, skipUnless
 from django.apps import apps
 from django.contrib.auth.models import Group, Permission, User
 from django.core.exceptions import ValidationError
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.urls import reverse
 
 from arches.app.models.system_settings import settings
@@ -241,11 +241,16 @@ class RuleApiTests(ApiTestCase):
 class ReferenceDataApiTests(ApiTestCase):
     def test_rule_types(self):
         types = self.client.get(reverse("abac_rule_types")).json()["rule_types"]
-        expected = ["lifecycle_state"]
+        expected = ["elasticsearch", "lifecycle_state"]
         if apps.is_installed("arches_resource_sets"):
             expected.append("resource_set")
         expected += ["spatial", "tile_node_value"]
         self.assertEqual([t["key"] for t in types], expected)
+
+    @override_settings(ELASTICSEARCH_ENABLED=False)
+    def test_elasticsearch_rule_type_needs_elasticsearch(self):
+        types = self.client.get(reverse("abac_rule_types")).json()["rule_types"]
+        self.assertNotIn("elasticsearch", [t["key"] for t in types])
 
     def test_resource_sets(self):
         response = self.client.get(reverse("abac_resource_sets"))
